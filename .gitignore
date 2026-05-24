@@ -1,0 +1,11 @@
+# This file tells Git which files shouldn't be added to source control
+
+.idea
+dist
+node_modules
+storage
+.env.local
+.env
+*.log
+*.sqlite
+.DS_Store
