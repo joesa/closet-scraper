@@ -1,11 +1,30 @@
-# This file tells Git which files shouldn't be added to source control
+# IDE/editor
+.idea/
+.vscode/
 
-.idea
-dist
-node_modules
-storage
-.env.local
-.env
+# Dependencies and build artifacts
+node_modules/
+dist/
+*.tsbuildinfo
+
+# Runtime data and generated outputs
+storage/
+exports/
 *.log
+logs/
+tmp/
+temp/
+
+# Local databases/caches
 *.sqlite
+*.sqlite3
+*.db
+
+# Environment/secrets (keep examples tracked)
+.env
+.env.*
+!.env.example
+!northflank.env.example
+
+# OS junk
 .DS_Store

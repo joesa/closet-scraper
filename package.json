@@ -7,18 +7,26 @@
     "dependencies": {
         "@crawlee/impit-client": "^3.0.0",
         "crawlee": "^3.0.0",
+        "dotenv": "^16.6.1",
         "playwright": "1.58.2"
     },
     "devDependencies": {
         "@apify/tsconfig": "^0.1.0",
+        "@types/node": "^24.0.0",
         "tsx": "^4.4.0",
-        "typescript": "~6.0.0",
-        "@types/node": "^24.0.0"
+        "typescript": "~6.0.0"
     },
     "scripts": {
         "start": "npm run start:dev",
         "start:prod": "node dist/main.js",
         "start:dev": "tsx src/main.ts",
+        "start:full-headless": "START_URLS= HEADLESS=true npm run start:dev",
+        "start:full-headless:no-webhooks": "START_URLS= HEADLESS=true DISABLE_WEBHOOKS=true npm run start:dev",
+        "start:loop-cities": "node scripts/run-cities-loop.mjs",
+        "start:one-city": "MAPS_KEYWORDS='custom closets' TARGET_LOCATIONS='Nashville TN' tsx src/main.ts",
+        "start:test-no-webhooks": "DISABLE_WEBHOOKS=true tsx src/main.ts",
+        "start:clarksville": "START_URLS='https://www.google.com/maps/search/custom+closet+contractors+Clarksville+TN/' DISABLE_WEBHOOKS=true HEADLESS=false tsx src/main.ts",
+        "start:clarksville:headless": "START_URLS='https://www.google.com/maps/search/custom+closet+contractors+Clarksville+TN/' DISABLE_WEBHOOKS=true HEADLESS=true tsx src/main.ts",
         "build": "tsc",
         "test": "echo \"Error: oops, the actor has no tests yet, sad!\" && exit 1",
         "postinstall": "npx crawlee install-playwright-browsers"
