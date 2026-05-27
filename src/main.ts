@@ -277,6 +277,7 @@ async function main() {
 
         await postRunStatus(config, 'completed', artifacts.runId, {
             stats,
+            leads: allLeads,
             webhooks: [pipelineAResult, pipelineBResult],
             artifacts,
             targetLocations: config.targetLocations,
