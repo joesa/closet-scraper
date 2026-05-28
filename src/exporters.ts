@@ -8,6 +8,7 @@ import {
   isRoleBasedEmail,
   type ComplianceResources,
 } from './compliance.js'
+import { isFranchiseEmail } from './enrichment.js'
 import type { QualifiedLead, SearchSeed } from './types.js'
 
 export interface ExportArtifacts {
@@ -23,6 +24,8 @@ export interface ExportArtifacts {
   instantlyPipelineAUploadCsvPath: string
   instantlyPipelineBUploadCsvPath: string
   instantlyCampaignPlaybookPath: string
+  smsOutreachCsvPath: string
+  lumpyMailCsvPath: string
 }
 
 export function nowRunId(): string {
@@ -133,6 +136,28 @@ type InstantlyUploadRow = {
   Website: string
 }
 
+type SmsOutreachRow = {
+  phone: string
+  companyName: string
+  address: string
+  hasWebsite: boolean
+  suggestedSms: string
+}
+
+type LumpyMailRow = {
+  companyName: string
+  address: string
+  city: string
+  reason: string
+}
+
+// Only these truly unusable addresses are hard-suppressed from outreach.
+const HARD_SUPPRESS_ROLES = new Set([
+  'noreply', 'no-reply', 'donotreply', 'do-not-reply',
+  'abuse', 'postmaster', 'webmaster',
+  'mailer-daemon', 'bounces', 'unsubscribe',
+])
+
 function leadsToInstantlyRows(
   leads: QualifiedLead[],
   compliance: ComplianceResources
@@ -178,11 +203,26 @@ function leadsToInstantlyRows(
     }
 
     const isRoleMailbox = isRoleBasedEmail(email, compliance.roleLocalParts)
-    if (compliance.excludeRoleEmails && isRoleMailbox) {
+
+    // Hard-suppress only truly unusable mailboxes (noreply, postmaster, etc.)
+    const localPart = email.split('@')[0] || ''
+    if (HARD_SUPPRESS_ROLES.has(localPart)) {
       suppressed.push({
         email,
         companyName: lead.businessName || '',
-        reason: 'role_mailbox_filtered',
+        reason: 'hard_role_suppressed',
+        pipeline: lead.enrichment.pipeline,
+        outreachRank: lead.enrichment.outreachRank,
+      })
+      continue
+    }
+
+    // Suppress franchise/corporate emails that won't respond to cold outreach
+    if (isFranchiseEmail(email)) {
+      suppressed.push({
+        email,
+        companyName: lead.businessName || '',
+        reason: 'franchise_domain_suppressed',
         pipeline: lead.enrichment.pipeline,
         outreachRank: lead.enrichment.outreachRank,
       })
@@ -283,6 +323,87 @@ function instantlyUploadRowsToCsv(rows: InstantlyUploadRow[]): string {
   const lines = [headers.join(',')]
   for (const row of rows) {
     const values = headers.map((h) => csvEscape((row as Record<string, string>)[h] || ''))
+    lines.push(values.join(','))
+  }
+  return `${lines.join('\n')}\n`
+}
+
+function buildSmsOutreachRows(leads: QualifiedLead[]): SmsOutreachRow[] {
+  const rows: SmsOutreachRow[] = []
+
+  for (const lead of leads) {
+    // Only include leads that have a phone but NO usable email
+    const hasEmail = !!(lead.enrichment.decisionMakerEmail || lead.enrichment.primaryEmail)
+    if (hasEmail) continue
+    if (!lead.phoneNumber) continue
+
+    const companyName = lead.businessName || 'your company'
+    const hasWebsite = !!(lead.websiteUrl && lead.enrichment.reason !== 'missing_website')
+
+    let suggestedSms: string
+    if (hasWebsite) {
+      suggestedSms = `Hi! I\'m Joseph from ClosetQuote. I build interactive pricing calculators for custom closet contractors — it embeds on your site, lets homeowners get instant estimates, and texts you the lead details. Looking for a few local businesses to try it free for 30 days. Mind if I send a quick demo video?`
+    } else {
+      suggestedSms = `Hi! Joseph from ClosetQuote here. I noticed ${companyName} needs a website! We build bespoke, beautiful, responsive sites for closet contractors and embed our interactive pricing widget right on it to capture leads. Play with the demo at www.closetquotes.com. Got 5 mins for a quick call to discuss?`
+    }
+
+    rows.push({
+      phone: lead.phoneNumber,
+      companyName: lead.businessName || '',
+      address: lead.address || '',
+      hasWebsite,
+      suggestedSms,
+    })
+  }
+
+  return rows
+}
+
+function smsOutreachRowsToCsv(rows: SmsOutreachRow[]): string {
+  const headers = ['phone', 'companyName', 'address', 'hasWebsite', 'suggestedSms']
+  const lines = [headers.join(',')]
+  for (const row of rows) {
+    const values = [
+      csvEscape(row.phone),
+      csvEscape(row.companyName),
+      csvEscape(row.address),
+      csvEscape(String(row.hasWebsite)),
+      csvEscape(row.suggestedSms),
+    ]
+    lines.push(values.join(','))
+  }
+  return `${lines.join('\n')}\n`
+}
+
+function buildLumpyMailRows(leads: QualifiedLead[]): LumpyMailRow[] {
+  const rows: LumpyMailRow[] = []
+  for (const lead of leads) {
+    const hasEmail = !!(lead.enrichment.decisionMakerEmail || lead.enrichment.primaryEmail)
+    const hasPhone = !!lead.phoneNumber
+    const hasAddress = !!lead.address
+
+    if (!hasEmail && !hasPhone && hasAddress) {
+      rows.push({
+        companyName: lead.businessName || 'Unknown Business',
+        address: lead.address || '',
+        city: parseCity(lead.address),
+        reason: 'No email or phone',
+      })
+    }
+  }
+  return rows
+}
+
+function lumpyMailRowsToCsv(rows: LumpyMailRow[]): string {
+  const headers = ['companyName', 'address', 'city', 'reason']
+  const lines = [headers.join(',')]
+  for (const row of rows) {
+    const values = [
+      csvEscape(row.companyName),
+      csvEscape(row.address),
+      csvEscape(row.city),
+      csvEscape(row.reason),
+    ]
     lines.push(values.join(','))
   }
   return `${lines.join('\n')}\n`
@@ -516,6 +637,8 @@ export async function writeRunArtifacts(params: {
   const instantlyPipelineAUploadCsvPath = path.join(directory, 'instantly_pipeline_a_upload.csv')
   const instantlyPipelineBUploadCsvPath = path.join(directory, 'instantly_pipeline_b_upload.csv')
   const instantlyCampaignPlaybookPath = path.join(directory, 'instantly_campaign_playbook.md')
+  const smsOutreachCsvPath = path.join(directory, 'sms_outreach.csv')
+  const lumpyMailCsvPath = path.join(directory, 'lumpy_mail.csv')
 
   await writeFile(
     jsonPath,
@@ -545,12 +668,17 @@ export async function writeRunArtifacts(params: {
   const instantlyPipelineAUploadRows = toInstantlyUploadRows(instantlyPipelineARows)
   const instantlyPipelineBUploadRows = toInstantlyUploadRows(instantlyPipelineBRows)
 
+  const smsOutreachRows = buildSmsOutreachRows(params.leads)
+  const lumpyMailRows = buildLumpyMailRows(params.leads)
+
   await writeFile(instantlyAllCsvPath, instantlyRowsToCsv(instantlyAllRows), 'utf8')
   await writeFile(instantlyPipelineACsvPath, instantlyRowsToCsv(instantlyPipelineARows), 'utf8')
   await writeFile(instantlyPipelineBCsvPath, instantlyRowsToCsv(instantlyPipelineBRows), 'utf8')
   await writeFile(instantlySuppressedCsvPath, suppressedRowsToCsv(suppressedRows), 'utf8')
   await writeFile(instantlyPipelineAUploadCsvPath, instantlyUploadRowsToCsv(instantlyPipelineAUploadRows), 'utf8')
   await writeFile(instantlyPipelineBUploadCsvPath, instantlyUploadRowsToCsv(instantlyPipelineBUploadRows), 'utf8')
+  await writeFile(smsOutreachCsvPath, smsOutreachRowsToCsv(smsOutreachRows), 'utf8')
+  await writeFile(lumpyMailCsvPath, lumpyMailRowsToCsv(lumpyMailRows), 'utf8')
   await writeFile(
     instantlyCampaignPlaybookPath,
     buildInstantlyCampaignPlaybook({
@@ -574,6 +702,8 @@ export async function writeRunArtifacts(params: {
         instantlyPipelineARowCount: instantlyPipelineARows.length,
         instantlyPipelineBRowCount: instantlyPipelineBRows.length,
         instantlySuppressedRowCount: suppressedRows.length,
+        smsOutreachRowCount: smsOutreachRows.length,
+        lumpyMailRowCount: lumpyMailRows.length,
         stats: params.stats,
       },
       null,
@@ -595,5 +725,7 @@ export async function writeRunArtifacts(params: {
     instantlyPipelineAUploadCsvPath,
     instantlyPipelineBUploadCsvPath,
     instantlyCampaignPlaybookPath,
+    smsOutreachCsvPath,
+    lumpyMailCsvPath,
   }
 }

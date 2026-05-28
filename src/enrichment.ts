@@ -36,8 +36,29 @@ const LINK_HINTS = [
 const DECISION_TITLE_REGEX = /(owner|founder|co-founder|ceo|chief executive officer|president|principal|managing partner|partner|director|managing director)/i
 const NAME_REGEX = /^[A-Z][a-z]+(?:\s+[A-Z][a-z]+){1,2}$/
 const EMAIL_REGEX = /[a-zA-Z0-9._%+-]+@[a-zA-Z0-9.-]+\.[a-zA-Z]{2,}/g
-const EMAIL_BLOCKLIST_PARTS = ['example.com', 'sentry', 'wix', 'bootstrap', 'cloudflare']
+const EMAIL_BLOCKLIST_PARTS = [
+  'example.com', 'domain.com', 'test.com', 'email.com', 'sample.com',
+  'yoursite.com', 'yourdomain.com', 'website.com', 'mysite.com',
+  'sentry.io', 'sentry', 'wix', 'bootstrap', 'cloudflare',
+  'placeholder', 'changeme',
+]
 const EMAIL_BLOCKLIST_SUFFIXES = ['.png', '.jpg', '.jpeg', '.gif', '.webp', '.svg', '.css', '.js']
+const EMAIL_BLOCKLIST_LOCAL_PARTS = new Set([
+  'user', 'example', 'test', 'email', 'name', 'your', 'yourname',
+  'firstname', 'lastname', 'john', 'jane', 'johndoe', 'janedoe',
+  'johnsmith', 'sample', 'demo', 'dummy', 'placeholder',
+])
+
+export const FRANCHISE_EMAIL_DOMAINS = new Set([
+  'calclosets.com', 'californiaclosets.com', 'closetsbydesign.com',
+  'containerstore.com', 'tailoredcloset.com', 'closetfactory.com',
+  'shelfgenie.com',
+])
+
+export function isFranchiseEmail(email: string): boolean {
+  const domain = email.split('@')[1]?.toLowerCase() || ''
+  return FRANCHISE_EMAIL_DOMAINS.has(domain)
+}
 const ROLE_LOCAL_PARTS = new Set([
   'info',
   'support',
@@ -100,7 +121,7 @@ type CandidateEmail = {
   confidence: number
 }
 
-type ValidationOptions = {
+export type ValidationOptions = {
   enableMxCheck: boolean
   enableSmtpCheck: boolean
   smtpTimeoutMs: number
@@ -171,6 +192,21 @@ function normalizeEmail(email: string): string {
   return email.trim().replace(/[),.;:]+$/g, '').toLowerCase()
 }
 
+function decodeHtmlEntities(text: string): string {
+  return text
+    .replace(/&#(\d+);/g, (_, n) => String.fromCharCode(Number(n)))
+    .replace(/&#x([0-9a-fA-F]+);/g, (_, h) => String.fromCharCode(parseInt(h, 16)))
+    .replace(/&amp;/gi, '&')
+    .replace(/&lt;/gi, '<')
+    .replace(/&gt;/gi, '>')
+    .replace(/&quot;/gi, '"')
+    .replace(/&apos;/gi, "'")
+    .replace(/\\u003e/gi, '>')
+    .replace(/\\u003c/gi, '<')
+    .replace(/u003e/gi, '>')
+    .replace(/u003c/gi, '<')
+}
+
 function deobfuscateEmailText(text: string): string {
   return text
     .replace(/\s*(\[at\]|\(at\)|\{at\})\s*/gi, '@')
@@ -188,6 +224,8 @@ function isLikelyValidEmail(email: string): boolean {
   if (!normalized.includes('@')) return false
   if (EMAIL_BLOCKLIST_SUFFIXES.some((suffix) => normalized.endsWith(suffix))) return false
   if (EMAIL_BLOCKLIST_PARTS.some((part) => normalized.includes(part))) return false
+  const localPart = normalized.split('@')[0] || ''
+  if (EMAIL_BLOCKLIST_LOCAL_PARTS.has(localPart)) return false
   return true
 }
 
@@ -209,7 +247,8 @@ function parseName(fullName: string): { first: string; last: string } | null {
 }
 
 function extractEmailsFromText(text: string): string[] {
-  const found = text.match(EMAIL_REGEX) || []
+  const decoded = decodeHtmlEntities(text)
+  const found = decoded.match(EMAIL_REGEX) || []
   const deduped = new Set<string>()
   for (const raw of found) {
     const normalized = normalizeEmail(raw)
@@ -370,8 +409,8 @@ function extractDecisionMakersFromJsonLd(html: string, pageUrl: string): Decisio
         const isPerson = type === 'person' || (Array.isArray(item?.['@type']) && item['@type'].includes('Person'))
         if (!isPerson) continue
 
-        const name = String(item?.name || '').replace(/\s+/g, ' ').trim()
-        const title = String(item?.jobTitle || item?.roleName || '').replace(/\s+/g, ' ').trim()
+        const name = String(item?.name || '').replace(/[\r\n\t]+/g, ' ').replace(/\s{2,}/g, ' ').trim()
+        const title = String(item?.jobTitle || item?.roleName || '').replace(/[\r\n\t]+/g, ' ').replace(/\s{2,}/g, ' ').trim()
         if (!name || !title) continue
         if (!NAME_REGEX.test(name) || !DECISION_TITLE_REGEX.test(title)) continue
 
@@ -383,6 +422,10 @@ function extractDecisionMakersFromJsonLd(html: string, pageUrl: string): Decisio
   }
 
   return found
+}
+
+function cleanExtractedText(raw: string): string {
+  return raw.replace(/[\r\n\t]+/g, ' ').replace(/\s{2,}/g, ' ').trim()
 }
 
 function extractDecisionMakersFromText(html: string, pageUrl: string): DecisionMaker[] {
@@ -401,8 +444,8 @@ function extractDecisionMakersFromText(html: string, pageUrl: string): DecisionM
   let match: RegExpExecArray | null
   do {
     match = nameThenTitle.exec(text)
-    const name = match?.[1]?.trim() || ''
-    const title = match?.[2]?.trim() || ''
+    const name = cleanExtractedText(match?.[1] || '')
+    const title = cleanExtractedText(match?.[2] || '')
     if (!name || !title) continue
     if (!NAME_REGEX.test(name) || !DECISION_TITLE_REGEX.test(title)) continue
     found.push({ name, title, sourceUrl: pageUrl })
@@ -410,8 +453,8 @@ function extractDecisionMakersFromText(html: string, pageUrl: string): DecisionM
 
   do {
     match = titleThenName.exec(text)
-    const title = match?.[1]?.trim() || ''
-    const name = match?.[2]?.trim() || ''
+    const title = cleanExtractedText(match?.[1] || '')
+    const name = cleanExtractedText(match?.[2] || '')
     if (!name || !title) continue
     if (!NAME_REGEX.test(name) || !DECISION_TITLE_REGEX.test(title)) continue
     found.push({ name, title, sourceUrl: pageUrl })
@@ -1076,4 +1119,41 @@ export async function classifyLeadWebsite(websiteUrl: string | null, options?: C
       confidenceLabel: confidence.label,
     }),
   }
+}
+
+export async function guessAndVerifyFallbackEmails(
+  businessName: string | null,
+  options: ValidationOptions
+): Promise<{ email: string; confidence: number } | null> {
+  if (!businessName || !options.enableSmtpCheck) return null
+
+  // Generate a clean theoretical domain name
+  const cleanName = businessName
+    .toLowerCase()
+    .replace(/[^a-z0-9]/g, '')
+    .trim()
+  
+  if (!cleanName || cleanName.length < 4) return null
+  const domain = `${cleanName}.com`
+
+  const domainValidation = await maybeValidateDomain(domain, options)
+  if (!domainValidation.mxValid || domainValidation.catchAll) {
+    return null
+  }
+
+  // Common prefixes to test
+  const prefixes = ['info', 'contact', 'hello', 'support', 'owner', 'office']
+
+  for (const prefix of prefixes) {
+    const candidateEmail = `${prefix}@${domain}`
+    const smtp = await smtpProbe(candidateEmail, domainValidation.mxHosts, domain, options)
+    if (smtp.accepted === true) {
+      // If we got a positive hit and it's not a catch-all, we return it!
+      return { email: candidateEmail, confidence: 80 }
+    }
+    // Respect the max probes limit per domain enforced internally by smtpProbe.
+    // If it starts rejecting or we hit the limit, we'll gracefully break/continue.
+  }
+
+  return null
 }

@@ -28,6 +28,8 @@ export interface EnrichmentResult {
     | 'contact_form_detected'
     | 'no_contact_form_detected'
     | 'contact_page_fetch_failed'
+    | 'social_profile_extraction'
+    | 'smtp_domain_guessing'
   contactPageUrl: string | null
   primaryEmail: string | null
   decisionMakerName: string | null

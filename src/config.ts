@@ -85,6 +85,8 @@ export interface ScraperConfig {
   runStatusUrl: string
   runStatusToken: string
   vercelProtectionBypassSecret: string
+  enableOmniFallback: boolean
+  enableLumpyMailExport: boolean
 }
 
 function loadEnvConfig(): ScraperConfig {
@@ -147,6 +149,8 @@ function loadEnvConfig(): ScraperConfig {
       process.env.SCRAPER_VERCEL_BYPASS_SECRET ||
       process.env.VERCEL_AUTOMATION_BYPASS_SECRET ||
       '',
+    enableOmniFallback: toBool(process.env.ENABLE_OMNI_FALLBACK, true),
+    enableLumpyMailExport: toBool(process.env.ENABLE_LUMPY_MAIL_EXPORT, true),
   }
 }
 
@@ -234,6 +238,12 @@ function mergeRemoteConfig(base: ScraperConfig, remote: Record<string, unknown>)
   }
   if ('webhookAuthHeader' in remote && typeof remote.webhookAuthHeader === 'string') {
     next.webhookAuthHeader = remote.webhookAuthHeader.trim() || next.webhookAuthHeader
+  }
+  if ('enableOmniFallback' in remote) {
+    next.enableOmniFallback = safeRemoteBool(remote.enableOmniFallback) ?? next.enableOmniFallback
+  }
+  if ('enableLumpyMailExport' in remote) {
+    next.enableLumpyMailExport = safeRemoteBool(remote.enableLumpyMailExport) ?? next.enableLumpyMailExport
   }
 
   return next

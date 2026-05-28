@@ -1,12 +1,13 @@
 import { createPlaywrightRouter } from 'crawlee'
 
 import type { ScraperConfig } from './config.js'
-import { classifyLeadWebsite } from './enrichment.js'
+import { classifyLeadWebsite, guessAndVerifyFallbackEmails } from './enrichment.js'
 import { upsertLead } from './state.js'
 import type { QualifiedLead, RawLead, SearchSeed } from './types.js'
 
 type RouteUserData = {
     seed?: SearchSeed
+    rawLead?: RawLead
 }
 
 function toAbsoluteGoogleMapsUrl(input: string | null): string | null {
@@ -142,7 +143,7 @@ export function buildRouter(config: ScraperConfig) {
         )
     })
 
-    router.addHandler('MAPS_PLACE', async ({ request, page, log, pushData }) => {
+    router.addHandler('MAPS_PLACE', async ({ request, page, log, pushData, addRequests }) => {
         const seed = (request.userData as RouteUserData).seed
         if (!seed) {
             log.warning('Place request missing seed metadata', { url: request.url })
@@ -245,6 +246,21 @@ export function buildRouter(config: ScraperConfig) {
             reviewCount: parseReviewCount(scraped.reviewText || scraped.ratingText),
         }
 
+        if (!rawLead.websiteUrl && config.enableOmniFallback) {
+            log.info('Lead missing website, engaging Omni-Channel fallback', { business: rawLead.businessName })
+            
+            // Construct Google Search URL for social profiles
+            const sq = encodeURIComponent(`site:facebook.com OR site:instagram.com "${rawLead.businessName}" "${seed.location}"`)
+            const searchUrl = `https://www.google.com/search?q=${sq}`
+            
+            await addRequests([{
+                url: searchUrl,
+                label: 'SOCIAL_SERP_SEARCH',
+                userData: { seed, rawLead }
+            }])
+            return // Stop processing this lead here, let the fallback handle it
+        }
+
         const enrichment = await classifyLeadWebsite(rawLead.websiteUrl, {
             maxSubPages: config.emailDiscoveryMaxPages,
             secondPassPages: config.emailDiscoverySecondPassPages,
@@ -275,6 +291,200 @@ export function buildRouter(config: ScraperConfig) {
             primaryEmail: qualifiedLead.enrichment.primaryEmail,
             confidence: `${qualifiedLead.enrichment.confidenceLabel}:${qualifiedLead.enrichment.confidenceScore}`,
         })
+    })
+
+    router.addHandler('SOCIAL_SERP_SEARCH', async ({ request, page, log, addRequests }) => {
+        const userData = request.userData as RouteUserData
+        if (!userData.rawLead) return
+
+        try {
+            await page.goto(request.url, { waitUntil: 'domcontentloaded', timeout: 30000 })
+            await page.waitForTimeout(1000)
+            
+            // Check for CAPTCHA
+            const isCaptcha = await page.evaluate(() => !!document.querySelector('form[action="/sorry/index"]'))
+            if (isCaptcha) {
+                log.warning('Google Search CAPTCHA hit, silently failing SERP hunt', { business: userData.rawLead.businessName })
+                // Let it fall through to SMS / Lumpy Mail by classifying with null website
+                await addRequests([{
+                    url: request.url, // arbitrary URL just to trigger the fallback processing
+                    label: 'FINALIZE_FALLBACK',
+                    userData
+                }])
+                return
+            }
+
+            const socialUrl = await page.evaluate(() => {
+                const anchors = Array.from(document.querySelectorAll('a[href]')) as HTMLAnchorElement[]
+                for (const a of anchors) {
+                    const href = a.href
+                    if (href.includes('facebook.com') || href.includes('instagram.com')) {
+                        // ignore google tracking params
+                        try {
+                            const u = new URL(href)
+                            if (u.hostname.endsWith('google.com') && u.pathname === '/url') {
+                                const q = u.searchParams.get('q')
+                                if (q && (q.includes('facebook.com') || q.includes('instagram.com'))) return q
+                            }
+                            return href
+                        } catch { }
+                    }
+                }
+                return null
+            })
+
+            if (socialUrl) {
+                log.info('Found social profile', { url: socialUrl })
+                await addRequests([{
+                    url: socialUrl,
+                    label: 'SOCIAL_PROFILE_SCRAPE',
+                    userData
+                }])
+            } else {
+                log.info('No social profile found in SERP', { business: userData.rawLead.businessName })
+                await addRequests([{
+                    url: request.url,
+                    label: 'FINALIZE_FALLBACK',
+                    userData
+                }])
+            }
+        } catch (err) {
+            log.warning('SOCIAL_SERP_SEARCH failed', { err: String(err) })
+            await addRequests([{
+                url: request.url,
+                label: 'FINALIZE_FALLBACK',
+                userData
+            }])
+        }
+    })
+
+    router.addHandler('SOCIAL_PROFILE_SCRAPE', async ({ request, page, log, addRequests, pushData }) => {
+        const userData = request.userData as RouteUserData
+        if (!userData.rawLead) return
+
+        try {
+            let targetUrl = request.url
+            if (targetUrl.includes('facebook.com') && !targetUrl.includes('about')) {
+                // Try to bypass timeline to contact info
+                const u = new URL(targetUrl)
+                targetUrl = `${u.origin}${u.pathname.replace(/\/$/, '')}/about_contact_and_basic_info`
+            }
+
+            await page.goto(targetUrl, { waitUntil: 'domcontentloaded', timeout: 30000 })
+            await page.waitForTimeout(2000)
+
+            const text = await page.evaluate(() => document.body.innerText)
+            
+            // Basic email regex extraction
+            const emailMatch = text.match(/([a-zA-Z0-9._-]+@[a-zA-Z0-9._-]+\.[a-zA-Z0-9_-]+)/)
+            const extractedEmail = emailMatch ? emailMatch[1].trim().toLowerCase() : null
+
+            userData.rawLead.websiteUrl = request.url // Record the social profile as their website
+
+            if (extractedEmail) {
+                log.info('Extracted email from social profile', { email: extractedEmail })
+                // Construct fake enrichment to push to Pipeline A
+                const qualifiedLead: QualifiedLead = {
+                    ...userData.rawLead,
+                    enrichment: {
+                        pipeline: 'PIPELINE_A' as const,
+                        reason: 'social_profile_extraction' as const,
+                        contactPageUrl: targetUrl,
+                        primaryEmail: extractedEmail,
+                        decisionMakerName: null,
+                        decisionMakerTitle: null,
+                        decisionMakerEmail: extractedEmail,
+                        decisionMakerEmailType: 'unknown',
+                        decisionMakerEmailConfidence: 80,
+                        decisionMakerEmailSource: 'social',
+                        discoveredEmails: [extractedEmail],
+                        pagesScanned: [targetUrl],
+                        confidenceScore: 80,
+                        confidenceLabel: 'medium' as const,
+                        outreachRank: 'A2' as const,
+                    }
+                }
+                upsertLead(qualifiedLead)
+                await pushData(qualifiedLead)
+            } else {
+                log.info('No email found on social profile, trying SMTP guess', { business: userData.rawLead.businessName })
+                await addRequests([{
+                    url: targetUrl,
+                    label: 'FINALIZE_FALLBACK',
+                    userData
+                }])
+            }
+        } catch (err) {
+            log.warning('SOCIAL_PROFILE_SCRAPE failed', { err: String(err) })
+            await addRequests([{
+                url: request.url,
+                label: 'FINALIZE_FALLBACK',
+                userData
+            }])
+        }
+    })
+
+    router.addHandler('FINALIZE_FALLBACK', async ({ request, pushData, log }) => {
+        const userData = request.userData as RouteUserData
+        if (!userData.rawLead) return
+        
+        let foundEmail: string | null = null
+        
+        const fallback = await guessAndVerifyFallbackEmails(userData.rawLead.businessName, {
+            enableMxCheck: config.enableMxCheck,
+            enableSmtpCheck: config.enableSmtpCheck,
+            smtpTimeoutMs: config.smtpTimeoutMs,
+            smtpMinIntervalMs: config.smtpMinIntervalMs,
+            smtpMaxProbesPerDomain: config.smtpMaxProbesPerDomain,
+            cacheValidationTtlDays: config.domainCacheValidationTtlDays,
+        })
+
+        if (fallback) {
+            log.info('Recovered email via SMTP fallback', { email: fallback.email })
+            foundEmail = fallback.email
+        }
+
+        const enrichment = foundEmail ? {
+            pipeline: 'PIPELINE_A' as const,
+            reason: 'smtp_domain_guessing' as const,
+            contactPageUrl: null,
+            primaryEmail: foundEmail,
+            decisionMakerName: null,
+            decisionMakerTitle: null,
+            decisionMakerEmail: foundEmail,
+            decisionMakerEmailType: 'unknown' as const,
+            decisionMakerEmailConfidence: fallback?.confidence || 0,
+            decisionMakerEmailSource: 'smtp_guess' as const,
+            discoveredEmails: [foundEmail],
+            pagesScanned: [],
+            confidenceScore: fallback?.confidence || 0,
+            confidenceLabel: 'medium' as const,
+            outreachRank: 'A2' as const,
+        } : {
+            pipeline: 'PIPELINE_B' as const,
+            reason: 'missing_website' as const,
+            contactPageUrl: null,
+            primaryEmail: null,
+            decisionMakerName: null,
+            decisionMakerTitle: null,
+            decisionMakerEmail: null,
+            decisionMakerEmailType: 'unknown' as const,
+            decisionMakerEmailConfidence: 0,
+            decisionMakerEmailSource: 'none' as const,
+            discoveredEmails: [],
+            pagesScanned: [],
+            confidenceScore: 0,
+            confidenceLabel: 'low' as const,
+            outreachRank: 'B1' as const,
+        }
+
+        const qualifiedLead: QualifiedLead = {
+            ...userData.rawLead,
+            enrichment,
+        }
+
+        upsertLead(qualifiedLead)
+        await pushData(qualifiedLead)
     })
 
     return router
