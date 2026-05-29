@@ -165,52 +165,22 @@ To reduce blocks / captchas:
 - CSV includes discovered emails, decision-maker fields, confidence score/label, and outreach rank (`A1`, `A2`, `B1`, `B2`) for QA triage.
 - Worker logs summary stats and webhook dispatch outcomes at run completion.
 
-## Deploy To Northflank (MicroVM)
+## Deploy To Apify
 
-This scraper is a batch-style worker (it runs and exits), so the cleanest production setup is a Northflank Job or Cron Job on a MicroVM. If you run it as a Service, set the restart policy to avoid tight crash loops when runs complete.
+This scraper is a batch-style worker built with Crawlee, so it deploys natively to the Apify platform.
 
-### 1) Create the workload
+### 1) Push to Apify
+Use the Apify CLI to push this repo as an Actor:
+`npx apify-cli push`
 
-- Create a new Northflank workload from this repo path.
-- Build with the existing `Dockerfile` in project root.
-- Use default container command from image (no override needed):
-	- `CMD ./start_xvfb_and_run_cmd.sh && npm run start:prod --silent`
+### 2) Configure Environment Variables
+In the Apify Console, navigate to your new Actor -> **Source** tab -> **Environment Variables**.
+Set the following:
+- `SCRAPER_CONTROL_PLANE_CONFIG_URL`
+- `SCRAPER_CONTROL_PLANE_TOKEN`
+- `SCRAPER_RUN_STATUS_URL`
+- `SCRAPER_RUN_STATUS_TOKEN`
+- `WEBHOOK_AUTH_TOKEN`
 
-### 2) Configure environment variables
-
-- Start from `northflank.env.example` in this repo.
-- Set required values at minimum:
-	- `PROXY_URLS`
-	- `INSTANTLY_PIPELINE_A_WEBHOOK_URL`
-	- `INSTANTLY_PIPELINE_B_WEBHOOK_URL`
-	- `WEBHOOK_AUTH_TOKEN` (must match dashboard `INSTANTLY_RECEIVER_AUTH_TOKEN`)
-- If you want scrape-only test runs on Northflank, set `DISABLE_WEBHOOKS=true`.
-
-### 3) Persist cache and exports (recommended)
-
-- Mount a persistent volume to `/home/myuser/storage`.
-- Keep `DOMAIN_CACHE_FILE=storage/domain-email-cache.json` so cross-run intelligence survives restarts.
-- Optional: mount `/home/myuser/exports` if you want generated CSV/JSON artifacts persisted between runs.
-
-### 4) Right-size runtime
-
-- Start conservative to reduce Google blocks:
-	- `MAX_CONCURRENCY=1`
-	- `MAX_RESULTS_PER_QUERY=25`
-	- `MAX_REQUESTS_PER_CRAWL=200`
-- Keep `HEADLESS=true` in MicroVM.
-
-### 5) Suggested execution modes
-
-- Single run against one city (safe test):
-	- set `START_URLS` to one Google Maps query URL.
-- Full city loop:
-	- clear `START_URLS`
-	- set `TARGET_LOCATIONS` and `MAPS_KEYWORDS`
-	- optionally use `scripts/run-cities-loop.mjs` in a separate job profile if you want paced city-by-city runs.
-
-### 6) Validate post-deploy
-
-- Confirm startup log contains `webhooksDisabled` with the expected boolean.
-- Confirm completion log includes webhook summary with expected `attemptedBatches`/`successfulBatches` counts.
-- On errors like `ERR_TUNNEL_CONNECTION_FAILED`, rotate/fix proxy endpoints first.
+### 3) Trigger from Dashboard
+Update your Closet Dashboard's Vercel environment variables with `SCRAPER_TRIGGER_WEBHOOK_URL` pointing to the Apify Actor Run API endpoint. Your dashboard will now automatically configure and launch the Apify scraper on demand.

@@ -3,7 +3,7 @@
     "name": "closet-scraper",
     "title": "ClosetQuote Scraper",
     "description": "Scrapes Google Maps and social media for custom closet contractor leads.",
-    "version": "1.0.0",
+    "version": "1.0",
     "meta": {
         "templateId": "ts-crawlee-playwright-chrome"
     },
