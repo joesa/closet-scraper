@@ -247,18 +247,22 @@ export function buildRouter(config: ScraperConfig) {
         }
 
         if (!rawLead.websiteUrl && config.enableOmniFallback) {
-            log.info('Lead missing website, engaging Omni-Channel fallback', { business: rawLead.businessName })
-            
-            // Construct Google Search URL for social profiles
-            const sq = encodeURIComponent(`site:facebook.com OR site:instagram.com "${rawLead.businessName}" "${seed.location}"`)
-            const searchUrl = `https://www.google.com/search?q=${sq}`
-            
-            await addRequests([{
-                url: searchUrl,
-                label: 'SOCIAL_SERP_SEARCH',
-                userData: { seed, rawLead }
-            }])
-            return // Stop processing this lead here, let the fallback handle it
+            if (!rawLead.businessName) {
+                log.warning('Lead missing website and businessName, skipping fallback', { url: request.url })
+            } else {
+                log.info('Lead missing website, engaging Omni-Channel fallback', { business: rawLead.businessName })
+                
+                // Construct Google Search URL for social profiles
+                const sq = encodeURIComponent(`site:facebook.com OR site:instagram.com "${rawLead.businessName}" "${seed.location}"`)
+                const searchUrl = `https://www.google.com/search?q=${sq}`
+                
+                await addRequests([{
+                    url: searchUrl,
+                    label: 'SOCIAL_SERP_SEARCH',
+                    userData: { seed, rawLead }
+                }])
+                return // Stop processing this lead here, let the fallback handle it
+            }
         }
 
         const enrichment = await classifyLeadWebsite(rawLead.websiteUrl, {
