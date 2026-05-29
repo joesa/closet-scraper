@@ -42,6 +42,40 @@ async function scrollMapsResults(page: any): Promise<void> {
     }
 }
 
+async function handleGoogleConsent(page: any): Promise<void> {
+    const consentHandled = await page.evaluate(() => {
+        const forms = Array.from(document.querySelectorAll('form'));
+        const consentForm = forms.find(f => f.action.includes('consent.google.com'));
+        
+        const buttons = Array.from(document.querySelectorAll('button'));
+        const rejectBtn = buttons.find(b => {
+            const text = (b.textContent || '').trim().toLowerCase();
+            return text === 'reject all' || text === 'tout refuser' || text === 'rifiuta tutto' || text === 'alle ablehnen';
+        });
+        
+        if (rejectBtn) {
+            rejectBtn.click();
+            return true;
+        }
+
+        const acceptBtn = buttons.find(b => {
+            const text = (b.textContent || '').trim().toLowerCase();
+            return text === 'accept all' || text === 'tout accepter' || text === 'accetta tutto' || text === 'alle akzeptieren';
+        });
+
+        if (acceptBtn) {
+            acceptBtn.click();
+            return true;
+        }
+
+        return false;
+    });
+
+    if (consentHandled) {
+        await page.waitForTimeout(2000);
+    }
+}
+
 async function extractPlaceUrls(page: any, maxResults: number): Promise<string[]> {
     return page.evaluate((max: number) => {
         const anchors = Array.from(document.querySelectorAll('a[href]')) as HTMLAnchorElement[]
@@ -124,7 +158,10 @@ export function buildRouter(config: ScraperConfig) {
         }
 
         await page.goto(request.url, { waitUntil: 'domcontentloaded', timeout: 60000 })
-        await page.waitForTimeout(1500)
+        await page.waitForTimeout(2000)
+        
+        await handleGoogleConsent(page)
+        
         await scrollMapsResults(page)
 
         const placeUrls = await extractPlaceUrls(page, config.maxResultsPerQuery)
@@ -151,7 +188,9 @@ export function buildRouter(config: ScraperConfig) {
         }
 
         await page.goto(request.url, { waitUntil: 'domcontentloaded', timeout: 60000 })
-        await page.waitForTimeout(1200)
+        await page.waitForTimeout(1500)
+        
+        await handleGoogleConsent(page)
 
         const scraped = await page.evaluate(() => {
             const headingCandidates = Array.from(document.querySelectorAll('h1')) as HTMLElement[]
