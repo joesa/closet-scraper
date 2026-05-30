@@ -1095,7 +1095,7 @@ export async function classifyLeadWebsite(websiteUrl: string | null, options?: C
   }
 
   const reason: EnrichmentResult['reason'] = sawContactForm ? 'contact_form_detected' : 'no_contact_form_detected'
-  const pipeline: EnrichmentResult['pipeline'] = sawContactForm ? 'PIPELINE_A' : 'PIPELINE_B'
+  const pipeline: EnrichmentResult['pipeline'] = 'PIPELINE_A'
 
   return {
     pipeline,
