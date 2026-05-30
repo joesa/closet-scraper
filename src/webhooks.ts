@@ -20,6 +20,12 @@ type CampaignSequenceStep = {
   body: string
 }
 
+type SmsTemplate = {
+  step: number
+  delayDays: number
+  body: string
+}
+
 type CampaignBlueprint = {
   name: string
   sequenceKey: 'widget_cold_outreach' | 'website_agency_upsell'
@@ -36,6 +42,7 @@ type CampaignBlueprint = {
     maxDelaySeconds: number
   }
   sequence: CampaignSequenceStep[]
+  smsTemplates?: SmsTemplate[]
 }
 
 function chunk<T>(items: T[], size: number): T[][] {
@@ -112,6 +119,18 @@ function campaignForPipeline(pipeline: Pipeline): CampaignBlueprint {
         subject: 'Re: Modern web design + lead engine for {Company Name}',
         body:
           '{First Name},\n\nJust following up on this. I put together a generic sandbox demo of the pricing engine so you can see the exact tool that would be built natively into your new site.\n\nIf you want to check it out or jump on a quick 5-minute call to talk about getting an online gallery set up for {Company Name}, let me know what day works best for you.\n\nBest,\nJoseph',
+      },
+    ],
+    smsTemplates: [
+      {
+        step: 1,
+        delayDays: 0,
+        body: `Hi! I found {businessName} on Google Maps while searching for closet contractors in {city}. Noticed you don't have a website yet — I build premium sites for contractors that come with a built-in quote calculator. It texts leads straight to your phone. Want to see a 60-sec demo? - Joseph, ClosetQuote`,
+      },
+      {
+        step: 2,
+        delayDays: 2,
+        body: `Hey, just following up about {businessName}. I've got a live demo you can try right now at closetquotes.com — most contractors see their first lead within 48 hours of going live. Want me to mock up a free design for your business? - Joseph`,
       },
     ],
   }
