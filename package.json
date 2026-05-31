@@ -14,7 +14,8 @@
         "@apify/tsconfig": "^0.1.0",
         "@types/node": "^24.0.0",
         "tsx": "^4.4.0",
-        "typescript": "~6.0.0"
+        "typescript": "~6.0.0",
+        "vitest": "^3.2.4"
     },
     "scripts": {
         "start": "npm run start:dev",
@@ -28,7 +29,8 @@
         "start:clarksville": "START_URLS='https://www.google.com/maps/search/custom+closet+contractors+Clarksville+TN/' DISABLE_WEBHOOKS=true HEADLESS=false tsx src/main.ts",
         "start:clarksville:headless": "START_URLS='https://www.google.com/maps/search/custom+closet+contractors+Clarksville+TN/' DISABLE_WEBHOOKS=true HEADLESS=true tsx src/main.ts",
         "build": "tsc",
-        "test": "echo \"Error: oops, the actor has no tests yet, sad!\" && exit 1",
+        "test": "vitest run",
+        "test:watch": "vitest",
         "postinstall": "npx crawlee install-playwright-browsers"
     },
     "author": "It's not you it's me",

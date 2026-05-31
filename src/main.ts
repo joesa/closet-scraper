@@ -1,6 +1,7 @@
 import 'dotenv/config'
 
 import net from 'node:net'
+import http from 'node:http'
 
 import { Browser, ImpitHttpClient } from '@crawlee/impit-client'
 import { PlaywrightCrawler, ProxyConfiguration, log } from 'crawlee'
@@ -9,7 +10,7 @@ import { loadComplianceResources } from './compliance.js'
 import { buildSearchSeeds, loadConfig } from './config.js'
 import type { ScraperConfig } from './config.js'
 import { configureDomainCache, flushDomainCache, loadDomainCache } from './domain-cache.js'
-import { nowRunId, writeRunArtifacts } from './exporters.js'
+import { mergeRunExports, nowRunId, writeRunArtifacts } from './exporters.js'
 import { getAllLeads, getLeadStats, getLeadsByPipeline } from './state.js'
 import { buildRouter } from './routes.js'
 import { dispatchToWebhook } from './webhooks.js'
@@ -113,17 +114,78 @@ async function tcpConnects(proxyUrl: string, timeoutMs: number): Promise<boolean
     }
 }
 
+// Issues a real HTTP request THROUGH the proxy (HTTP proxy protocol: send the
+// absolute target URL on the request line) to confirm it can relay traffic,
+// not just accept a TCP connection. Any HTTP response < 500 counts as healthy.
+async function httpThroughProxyOk(
+    proxyUrl: string,
+    targetUrl: string,
+    timeoutMs: number
+): Promise<boolean> {
+    return new Promise<boolean>((resolve) => {
+        try {
+            const proxy = new URL(proxyUrl)
+            const target = new URL(targetUrl)
+            const port = proxy.port
+                ? Number.parseInt(proxy.port, 10)
+                : proxy.protocol === 'https:'
+                    ? 443
+                    : 80
+
+            if (!Number.isFinite(port) || port <= 0) {
+                resolve(false)
+                return
+            }
+
+            const auth = proxy.username
+                ? `${decodeURIComponent(proxy.username)}:${decodeURIComponent(proxy.password)}`
+                : undefined
+
+            const req = http.request(
+                {
+                    host: proxy.hostname,
+                    port,
+                    method: 'GET',
+                    path: target.toString(),
+                    headers: { Host: target.host, 'Proxy-Connection': 'close' },
+                    timeout: timeoutMs,
+                    auth,
+                },
+                (res) => {
+                    const status = res.statusCode ?? 0
+                    res.resume()
+                    resolve(status > 0 && status < 500)
+                }
+            )
+
+            req.once('timeout', () => {
+                req.destroy()
+                resolve(false)
+            })
+            req.once('error', () => resolve(false))
+            req.end()
+        } catch {
+            resolve(false)
+        }
+    })
+}
+
 async function filterHealthyProxyUrls(
     proxyUrls: string[],
-    timeoutMs: number
+    options: { timeoutMs: number; httpCheck: boolean; healthUrl: string }
 ): Promise<{ healthy: string[]; unhealthy: string[] }> {
     if (proxyUrls.length === 0) return { healthy: [], unhealthy: [] }
 
     const checks = await Promise.all(
-        proxyUrls.map(async (proxyUrl) => ({
-            proxyUrl,
-            ok: await tcpConnects(proxyUrl, timeoutMs),
-        }))
+        proxyUrls.map(async (proxyUrl) => {
+            // A proxy is healthy if it accepts a TCP connection AND (when
+            // enabled) successfully relays an HTTP request.
+            const tcpOk = await tcpConnects(proxyUrl, options.timeoutMs)
+            if (!tcpOk) return { proxyUrl, ok: false }
+            if (!options.httpCheck) return { proxyUrl, ok: true }
+            const httpOk = await httpThroughProxyOk(proxyUrl, options.healthUrl, options.timeoutMs)
+            return { proxyUrl, ok: httpOk }
+        })
     )
 
     return {
@@ -160,7 +222,11 @@ async function main() {
         if (config.proxyHealthcheckEnabled && configuredProxyUrls.length > 0) {
             const { healthy, unhealthy } = await filterHealthyProxyUrls(
                 configuredProxyUrls,
-                config.proxyHealthcheckTimeoutMs
+                {
+                    timeoutMs: config.proxyHealthcheckTimeoutMs,
+                    httpCheck: config.proxyHealthcheckHttp,
+                    healthUrl: config.proxyHealthcheckUrl,
+                }
             )
             healthyProxyUrls = healthy
 
@@ -215,6 +281,17 @@ async function main() {
             maxRequestsPerCrawl: config.maxRequestsPerCrawl,
             maxConcurrency: config.maxConcurrency,
             requestHandlerTimeoutSecs: 90,
+            // Retry transient failures (timeouts, proxy errors, CAPTCHA throws)
+            // with a fresh session before giving up on a request.
+            maxRequestRetries: config.maxRequestRetries,
+            failedRequestHandler: async ({ request, log: reqLog }, error) => {
+                reqLog.error('Request failed after all retries', {
+                    url: request.url,
+                    label: request.label,
+                    retryCount: request.retryCount,
+                    ...telemetryErrorPayload(error),
+                })
+            },
             launchContext: {
                 launchOptions: {
                     headless: config.headless,
@@ -283,6 +360,15 @@ async function main() {
             targetLocations: config.targetLocations,
             selectedCities: config.targetLocations,
         })
+
+        // When running a per-city loop, aggregate all run exports into one
+        // deduped dataset so downstream consumers get a single file.
+        if (config.mergeExports) {
+            const merged = await mergeRunExports()
+            if (merged) {
+                log.info('Merged per-city run exports', merged)
+            }
+        }
 
         await flushDomainCache()
     } catch (error) {

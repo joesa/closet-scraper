@@ -1,4 +1,4 @@
-import { mkdir, writeFile } from 'node:fs/promises'
+import { mkdir, writeFile, readFile, readdir } from 'node:fs/promises'
 import path from 'node:path'
 
 import {
@@ -10,6 +10,13 @@ import {
 } from './compliance.js'
 import { isFranchiseEmail } from './enrichment.js'
 import type { QualifiedLead, SearchSeed } from './types.js'
+import {
+  PIPELINE_A_CAMPAIGN,
+  PIPELINE_B_CAMPAIGN,
+  CAMPAIGN_SCHEDULE,
+  CAMPAIGN_SAFETY,
+  type CampaignBlueprint,
+} from './campaigns.js'
 
 export interface ExportArtifacts {
   runId: string
@@ -409,12 +416,57 @@ function lumpyMailRowsToCsv(rows: LumpyMailRow[]): string {
   return `${lines.join('\n')}\n`
 }
 
+function renderCampaignSection(
+  campaign: CampaignBlueprint,
+  label: string,
+  uploadFile: string
+): string[] {
+  const lines: string[] = [
+    `## Campaign ${label} Setup`,
+    `- Campaign name: ${campaign.name}`,
+    `- Audience file: ${uploadFile}`,
+    '- Sequence steps:',
+  ]
+  campaign.sequence.forEach((step, i) => {
+    const timing = i === 0 ? 'immediately' : `after ${step.waitDaysAfterPrevious} days if no reply`
+    lines.push(`  - Step ${step.step}: Send Email ${i + 1} ${timing}`)
+  })
+  lines.push('')
+  campaign.sequence.forEach((step, i) => {
+    const heading = i === 0
+      ? `### Campaign ${label} - Email ${i + 1}`
+      : `### Campaign ${label} - Email ${i + 1} (${step.waitDaysAfterPrevious} days later, no reply)`
+    lines.push(heading)
+    lines.push(`Subject: ${step.subject}`)
+    lines.push('')
+    lines.push(...step.body.split('\n'))
+    lines.push('')
+  })
+  return lines
+}
+
+function renderPositiveReply(campaign: CampaignBlueprint, label: string): string[] {
+  return [
+    `### ${label} Positive Reply Template`,
+    'Subject: (reply in same thread)',
+    '',
+    ...campaign.positiveReply.body.split('\n'),
+    '',
+  ]
+}
+
 function buildInstantlyCampaignPlaybook(params: {
   runId: string
   pipelineACount: number
   pipelineBCount: number
   allCount: number
 }): string {
+  // All email/SMS copy comes from src/campaigns.ts (shared with webhooks.ts) so
+  // the playbook never drifts from what the dispatcher sends.
+  const days = `${CAMPAIGN_SCHEDULE.days[0].replace(/^\w/, (c) => c.toUpperCase())}-${CAMPAIGN_SCHEDULE.days[CAMPAIGN_SCHEDULE.days.length - 1].replace(/^\w/, (c) => c.toUpperCase())}`
+  const fmtHour = (h: number) => `${((h + 11) % 12) + 1}:00 ${h < 12 ? 'AM' : 'PM'}`
+  const sendingWindow = `${days}, ${fmtHour(CAMPAIGN_SCHEDULE.startHour)}-${fmtHour(CAMPAIGN_SCHEDULE.endHour)} (target timezone)`
+
   return [
     `# Instantly Campaign Playbook - Run ${params.runId}`,
     '',
@@ -431,114 +483,16 @@ function buildInstantlyCampaignPlaybook(params: {
     '- Company Name -> business name',
     '- Website -> site URL (blank is acceptable for Pipeline B)',
     '',
-    '## Campaign A Setup',
-    '- Campaign name: ClosetQuote - Widget Cold Outreach',
-    '- Audience file: instantly_pipeline_a_upload.csv',
-    '- Sequence steps:',
-    '  - Step 1: Send Email 1 immediately',
-    '  - Step 2: Send Email 2 after 3 days if no reply',
-    '',
-    '### Campaign A - Email 1',
-    'Subject: Quick idea for {Company Name}\'s website',
-    '',
-    'Hi {First Name},',
-    '',
-    'I am a software builder with 20+ years of experience here in the Nashville, TN. I was looking at your site ({Website}) and noticed you\'re relying on a standard contact form to capture incoming customer inquiries.',
-    '',
-    'I recently built an interactive pricing calculator designed specifically for custom storage and closet contractors. It embeds right onto your existing site, allows homeowners to get an instant anchored price range based on their linear footage and finishes, and immediately texts the full lead details directly to your phone.',
-    '',
-    'I\'m looking for a few local businesses in your area to test it out completely free for 30 days. No credit card required. Mind if I send over a quick 60-second video showing how it works?',
-    '',
-    'Best,',
-    'Joseph Sintim-Amoah',
-    'Founder, ClosetQuote',
-    '',
-    '### Campaign A - Email 2 (3 days later, no reply)',
-    'Subject: Re: Quick idea for {Company Name}\'s website',
-    '',
-    'Hi {First Name},',
-    '',
-    'I know you\'re busy running projects, so I\'ll keep this brief.',
-    '',
-    'I set up a public sandbox demo on our landing page where you can play with the calculator yourself to see how it looks on mobile.',
-    '',
-    'Let me know if you\'d be open to checking out the link.',
-    '',
-    'Thanks,',
-    'Joseph',
-    '',
-    '## Campaign B Setup',
-    '- Campaign name: ClosetQuote - Website Agency Upsell',
-    '- Audience file: instantly_pipeline_b_upload.csv',
-    '- Sequence steps:',
-    '  - Step 1: Send Email 1 immediately',
-    '  - Step 2: Send Email 2 after 4 days if no reply',
-    '',
-    '### Campaign B - Email 1',
-    'Subject: Modern web design + lead engine for {Company Name}',
-    '',
-    'Hi {First Name},',
-    '',
-    'I was looking for local custom storage contractors online and noticed that {Company Name} does not have an active website set up yet. In this space, missing a digital portfolio means losing high-end jobs to competitors who show off their work online.',
-    '',
-    'I build premium, lightning-fast showcase sites specifically for independent contractors. My builds come pre-loaded with an interactive pricing widget that gives homeowners instant estimates and texts their contact info, room measurements, and material selections straight to your cell phone.',
-    '',
-    'I\'m looking to build a local case study this month and can handle the entire design, hosting setup, and widget integration for a flat, one-time fee.',
-    '',
-    'Would you be open to seeing a quick mockup layout of what I could put together for {Company Name}?',
-    '',
-    'Best,',
-    'Joseph Sintim-Amoah',
-    'Founder, ClosetQuote',
-    '',
-    '### Campaign B - Email 2 (4 days later, no reply)',
-    'Subject: Re: Modern web design + lead engine for {Company Name}',
-    '',
-    '{First Name},',
-    '',
-    'Just following up on this. I put together a generic sandbox demo of the pricing engine so you can see the exact tool that would be built natively into your new site.',
-    '',
-    'If you want to check it out or jump on a quick 5-minute call to talk about getting an online gallery set up for {Company Name}, let me know what day works best for you.',
-    '',
-    'Best,',
-    'Joseph',
-    '',
+    ...renderCampaignSection(PIPELINE_A_CAMPAIGN, 'A', 'instantly_pipeline_a_upload.csv'),
+    ...renderCampaignSection(PIPELINE_B_CAMPAIGN, 'B', 'instantly_pipeline_b_upload.csv'),
     '## Positive Reply Follow-Up Templates',
     '',
-    '### Pipeline A Positive Reply Template',
-    'Subject: (reply in same thread)',
-    '',
-    'Awesome, appreciate you getting back to me, {First Name}.',
-    '',
-    'Here is the 60-second video showing exactly how it embeds on a site and texts you the lead: [INSERT_LOOM_LINK]',
-    '',
-    'You can also play with a live sandbox version on your phone right here to see exactly what your customers would see: [INSERT_LANDING_PAGE_LINK]',
-    '',
-    'If you want to drop this on your site today, you can grab your 30-day free beta account here (no credit card required). Just let me know if you want me to help you configure your specific room pricing matrix.',
-    '',
-    'Best,',
-    'Joseph',
-    '',
-    '### Pipeline B Positive Reply Template',
-    'Subject: (reply in same thread)',
-    '',
-    'Great to connect, {First Name}.',
-    '',
-    'Before we talk layouts and design, I want to show you the actual lead-capture engine that comes built natively into the sites I make.',
-    '',
-    'You can test drive a live sandbox of the calculator here: [INSERT_LANDING_PAGE_LINK]',
-    '',
-    'Imagine a homeowner landing on your new digital portfolio, playing with that widget, and their exact measurements and contact info immediately buzzing your cell phone.',
-    '',
-    'I\'d love to throw together a quick, custom layout mockup for {Company Name} so you can see what it looks like with your branding. Are you around for a quick 10-minute call this Tuesday or Wednesday to talk about the style you\'re looking for?',
-    '',
-    'Best,',
-    'Joseph',
-    '',
+    ...renderPositiveReply(PIPELINE_A_CAMPAIGN, 'Pipeline A'),
+    ...renderPositiveReply(PIPELINE_B_CAMPAIGN, 'Pipeline B'),
     '## Campaign Safety Controls (both campaigns)',
-    '- Daily max volume: 20 emails/day/account',
-    '- Random delay: 300-600 seconds between emails',
-    '- Sending window: Monday-Friday, 9:00 AM-5:00 PM (target timezone)',
+    `- Daily max volume: ${CAMPAIGN_SAFETY.maxDailyPerAccount} emails/day/account`,
+    `- Random delay: ${CAMPAIGN_SAFETY.minDelaySeconds}-${CAMPAIGN_SAFETY.maxDelaySeconds} seconds between emails`,
+    `- Sending window: ${sendingWindow}`,
     '- Keep warmup enabled and ramp volume gradually.',
     '',
     '## Activation Checklist',
@@ -614,6 +568,78 @@ function leadsToCsv(leads: QualifiedLead[]): string {
   }
 
   return `${lines.join('\n')}\n`
+}
+
+// Stable dedup key for a lead across runs: prefer the discovered email, then
+// the website domain, then the Maps place URL.
+function leadDedupKey(lead: QualifiedLead): string {
+  const email = lead.enrichment?.primaryEmail?.toLowerCase().trim()
+  if (email) return `email:${email}`
+  const site = toDomain(lead.websiteUrl).toLowerCase()
+  if (site) return `site:${site}`
+  return `place:${lead.mapsPlaceUrl}`
+}
+
+/**
+ * Aggregate every `leads.json` under `exports/run-<id>` produced by a per-city
+ * loop into a single deduped dataset under `exports/combined`. Returns null when
+ * there are no run exports to merge.
+ */
+export async function mergeRunExports(): Promise<
+  { combinedDir: string; runCount: number; leadCount: number } | null
+> {
+  const exportsRoot = path.join(process.cwd(), 'exports')
+
+  let entries: string[]
+  try {
+    entries = await readdir(exportsRoot)
+  } catch {
+    return null
+  }
+
+  const runDirs = entries.filter((name) => name.startsWith('run-')).sort()
+  if (runDirs.length === 0) return null
+
+  const seen = new Set<string>()
+  const merged: QualifiedLead[] = []
+
+  for (const dir of runDirs) {
+    const jsonPath = path.join(exportsRoot, dir, 'leads.json')
+    let parsed: { leads?: QualifiedLead[] }
+    try {
+      parsed = JSON.parse(await readFile(jsonPath, 'utf8'))
+    } catch {
+      continue
+    }
+    const leads = Array.isArray(parsed.leads) ? parsed.leads : []
+    for (const lead of leads) {
+      const key = leadDedupKey(lead)
+      if (seen.has(key)) continue
+      seen.add(key)
+      merged.push(lead)
+    }
+  }
+
+  const combinedDir = path.join(exportsRoot, 'combined')
+  await mkdir(combinedDir, { recursive: true })
+
+  await writeFile(
+    path.join(combinedDir, 'leads.json'),
+    JSON.stringify(
+      {
+        generatedAt: new Date().toISOString(),
+        runCount: runDirs.length,
+        leadCount: merged.length,
+        leads: merged,
+      },
+      null,
+      2
+    ),
+    'utf8'
+  )
+  await writeFile(path.join(combinedDir, 'leads.csv'), leadsToCsv(merged), 'utf8')
+
+  return { combinedDir, runCount: runDirs.length, leadCount: merged.length }
 }
 
 export async function writeRunArtifacts(params: {

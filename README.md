@@ -5,7 +5,7 @@ Google Maps lead extraction and enrichment worker for ClosetQuote outbound.
 ## What this worker does
 
 1. Generates Google Maps search URLs from keyword/location combinations.
-2. Opens each query in a PlaywrightCrawler and scrolls Maps results.
+2. Opens each query in a PlaywrightCrawler and scrolls Maps results (detecting and retrying through Google CAPTCHA / "unusual traffic" walls).
 3. Visits each business place URL and extracts lead fields:
 	- Business name
 	- Website URL
@@ -16,12 +16,12 @@ Google Maps lead extraction and enrichment worker for ClosetQuote outbound.
 5. Extracts likely decision-makers (owner/founder/president/principal/CEO/managing partner) from team/about pages and JSON-LD Person data.
 6. Infers personal-email patterns per domain and generates personal candidate emails.
 7. Optionally validates candidates with MX and SMTP probes (strictly gated by env flags).
-5. Enriches each lead by checking for contact form signals on the business site.
-8. Classifies leads into two outbound pipelines:
-	- PIPELINE_A: Website has contact-form signals.
-	- PIPELINE_B: Missing website or no contact form detected.
-9. Exports each run to local JSON/CSV for QA before outreach.
-10. Sends batched JSON payloads to Instantly webhook endpoints.
+8. Enriches each lead by checking for contact-form signals on the business site.
+9. Classifies leads into two outbound pipelines based on whether the business has a reachable website:
+	- **PIPELINE_A** (widget cold outreach): the business has a working website (at least one page fetched), whether or not a contact form was detected (`contact_form_detected` / `no_contact_form_detected`).
+	- **PIPELINE_B** (website agency upsell): the business has no website (`missing_website`) or its site could not be fetched (`contact_page_fetch_failed`).
+10. Exports each run to local JSON/CSV for QA before outreach.
+11. Sends batched JSON payloads to Instantly webhook endpoints.
 
 ## Environment setup
 
@@ -36,11 +36,21 @@ Copy `.env.example` to `.env`, then configure:
 - `INSTANTLY_PIPELINE_A_WEBHOOK_URL`
 - `INSTANTLY_PIPELINE_B_WEBHOOK_URL`
 
+## Production operations
+
+- Set `MAX_CONCURRENCY` to **1–2** on Apify/production runs to reduce Maps CAPTCHA rate and proxy burn.
+- When `DISABLE_WEBHOOKS=false`, **`WEBHOOK_AUTH_TOKEN` must match** `INSTANTLY_RECEIVER_AUTH_TOKEN` on the dashboard. The scraper refuses to POST batches if the URL is set but the token is empty.
+- Failed webhook batches are logged with status and response body (first 500 chars) per batch.
+
 Optional:
 
 - `WEBHOOK_AUTH_HEADER` and `WEBHOOK_AUTH_TOKEN`
 - `PROXY_HEALTHCHECK_ENABLED`, `PROXY_HEALTHCHECK_TIMEOUT_MS`, `PROXY_HEALTHCHECK_MIN_HEALTHY`
+- `PROXY_HEALTHCHECK_HTTP` (default `true`): also issue an HTTP request *through* each proxy (not just a TCP connect) to confirm it can relay traffic.
+- `PROXY_HEALTHCHECK_URL` (default `http://www.google.com/generate_204`): target for the HTTP-through-proxy check.
 - `MAX_RESULTS_PER_QUERY`, `MAX_CONCURRENCY`, `MAX_REQUESTS_PER_CRAWL`
+- `MAX_REQUEST_RETRIES` (default `3`): retry transient failures (timeouts, proxy errors, CAPTCHA blocks) with a fresh session before giving up.
+- `SCRAPER_MERGE_EXPORTS` (default `false`): after a run, merge every `exports/run-*` dataset from a per-city loop into one deduped `exports/combined` dataset.
 - `EMAIL_DISCOVERY_MAX_PAGES`, `EMAIL_DISCOVERY_SECOND_PASS_PAGES`, `EMAIL_DISCOVERY_TIMEOUT_MS`
 - `DECISION_MAKER_MAX_PAGES`, `EMAIL_CONFIDENCE_THRESHOLD`
 - `ENABLE_MX_CHECK`, `ENABLE_SMTP_CHECK`, `SMTP_TIMEOUT_MS`, `SMTP_MIN_INTERVAL_MS`, `SMTP_MAX_PROBES_PER_DOMAIN`
@@ -145,6 +155,7 @@ To reduce blocks / captchas:
 
 - Crawlee stores each qualified lead in the default dataset.
 - Each run writes files in `exports/run-<timestamp>/` with `leads.json`, `leads.csv`, `summary.json`, plus Instantly-ready CSVs.
+- When `SCRAPER_MERGE_EXPORTS=true`, a per-city loop's runs are aggregated (deduped by email → website domain → Maps place URL) into `exports/combined/leads.json` and `exports/combined/leads.csv`.
 - Instantly CSV files:
 	- `instantly_all.csv`
 	- `instantly_pipeline_a.csv`

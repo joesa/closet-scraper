@@ -45,9 +45,14 @@ export interface ScraperConfig {
   proxyHealthcheckEnabled: boolean
   proxyHealthcheckTimeoutMs: number
   proxyHealthcheckMinHealthy: number
+  // When true, the proxy health check also issues an HTTP request THROUGH each
+  // proxy (not just a TCP connect) to confirm it can actually relay traffic.
+  proxyHealthcheckHttp: boolean
+  proxyHealthcheckUrl: string
   startUrls: string[]
   disableWebhooks: boolean
   maxRequestsPerCrawl: number
+  maxRequestRetries: number
   maxResultsPerQuery: number
   maxConcurrency: number
   emailDiscoveryMaxPages: number
@@ -87,6 +92,9 @@ export interface ScraperConfig {
   vercelProtectionBypassSecret: string
   enableOmniFallback: boolean
   enableLumpyMailExport: boolean
+  // When true, after a run the scraper merges all exports/run-* datasets from a
+  // per-city loop into a single deduped exports/combined dataset.
+  mergeExports: boolean
 }
 
 function loadEnvConfig(): ScraperConfig {
@@ -102,9 +110,12 @@ function loadEnvConfig(): ScraperConfig {
     proxyHealthcheckEnabled: toBool(process.env.PROXY_HEALTHCHECK_ENABLED, true),
     proxyHealthcheckTimeoutMs: toInt(process.env.PROXY_HEALTHCHECK_TIMEOUT_MS, 2500),
     proxyHealthcheckMinHealthy: toInt(process.env.PROXY_HEALTHCHECK_MIN_HEALTHY, 1),
+    proxyHealthcheckHttp: toBool(process.env.PROXY_HEALTHCHECK_HTTP, true),
+    proxyHealthcheckUrl: process.env.PROXY_HEALTHCHECK_URL || 'http://www.google.com/generate_204',
     startUrls,
     disableWebhooks: process.env.DISABLE_WEBHOOKS === 'true',
     maxRequestsPerCrawl: toInt(process.env.MAX_REQUESTS_PER_CRAWL, 500),
+    maxRequestRetries: toInt(process.env.MAX_REQUEST_RETRIES, 3),
     maxResultsPerQuery: toInt(process.env.MAX_RESULTS_PER_QUERY, 120),
     maxConcurrency: toInt(process.env.MAX_CONCURRENCY, 8),
     emailDiscoveryMaxPages: toInt(process.env.EMAIL_DISCOVERY_MAX_PAGES, 3),
@@ -151,6 +162,7 @@ function loadEnvConfig(): ScraperConfig {
       '',
     enableOmniFallback: toBool(process.env.ENABLE_OMNI_FALLBACK, true),
     enableLumpyMailExport: toBool(process.env.ENABLE_LUMPY_MAIL_EXPORT, true),
+    mergeExports: toBool(process.env.SCRAPER_MERGE_EXPORTS, false),
   }
 }
 

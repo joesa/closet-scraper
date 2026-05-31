@@ -76,6 +76,28 @@ async function handleGoogleConsent(page: any): Promise<void> {
     }
 }
 
+// Detects Google's anti-bot interstitial (the "/sorry/" CAPTCHA page or an
+// "unusual traffic" notice). Used on both Maps and Search so a blocked request
+// fails loudly (and can be retried with a fresh session/proxy) instead of
+// silently returning zero results.
+async function isGoogleBlocked(page: any): Promise<boolean> {
+    try {
+        const currentUrl = (page.url?.() as string) || ''
+        if (currentUrl.includes('/sorry/')) return true
+        return await page.evaluate(() => {
+            if (document.querySelector('form[action="/sorry/index"]')) return true
+            const text = (document.body?.innerText || '').toLowerCase()
+            return (
+                text.includes('unusual traffic') ||
+                text.includes('our systems have detected') ||
+                text.includes('verify you') && text.includes('not a robot')
+            )
+        })
+    } catch {
+        return false
+    }
+}
+
 async function extractPlaceUrls(page: any, maxResults: number): Promise<string[]> {
     return page.evaluate((max: number) => {
         const anchors = Array.from(document.querySelectorAll('a[href]')) as HTMLAnchorElement[]
@@ -161,7 +183,13 @@ export function buildRouter(config: ScraperConfig) {
         await page.waitForTimeout(2000)
         
         await handleGoogleConsent(page)
-        
+
+        // Bail (and let Crawlee retry with a new session) if Maps served a
+        // CAPTCHA / "unusual traffic" wall instead of results.
+        if (await isGoogleBlocked(page)) {
+            throw new Error(`Google Maps CAPTCHA/block hit for query "${seed.query}"`)
+        }
+
         await scrollMapsResults(page)
 
         const placeUrls = await extractPlaceUrls(page, config.maxResultsPerQuery)
@@ -344,8 +372,8 @@ export function buildRouter(config: ScraperConfig) {
             await page.goto(request.url, { waitUntil: 'domcontentloaded', timeout: 30000 })
             await page.waitForTimeout(1000)
             
-            // Check for CAPTCHA
-            const isCaptcha = await page.evaluate(() => !!document.querySelector('form[action="/sorry/index"]'))
+            // Check for CAPTCHA / "unusual traffic" block
+            const isCaptcha = await isGoogleBlocked(page)
             if (isCaptcha) {
                 log.warning('Google Search CAPTCHA hit, silently failing SERP hunt', { business: userData.rawLead.businessName })
                 // Let it fall through to SMS / Lumpy Mail by classifying with null website
