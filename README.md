@@ -1,6 +1,6 @@
 # Closet Scraper (Crawlee + Playwright)
 
-Google Maps lead extraction and enrichment worker for ClosetQuote outbound.
+Google Maps lead extraction and enrichment worker for DitchTheForm outbound.
 
 ## What this worker does
 

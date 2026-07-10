@@ -92,6 +92,10 @@ export interface ScraperConfig {
   vercelProtectionBypassSecret: string
   enableOmniFallback: boolean
   enableLumpyMailExport: boolean
+  // Vertical/industry parameters used to template outreach copy so the same
+  // pipeline can target any service trade (plumbing, towing, landscaping…).
+  industryName: string
+  industryProblem: string
   // When true, after a run the scraper merges all exports/run-* datasets from a
   // per-city loop into a single deduped exports/combined dataset.
   mergeExports: boolean
@@ -162,6 +166,10 @@ function loadEnvConfig(): ScraperConfig {
       '',
     enableOmniFallback: toBool(process.env.ENABLE_OMNI_FALLBACK, true),
     enableLumpyMailExport: toBool(process.env.ENABLE_LUMPY_MAIL_EXPORT, true),
+    industryName: process.env.INDUSTRY_NAME || 'custom closet & storage',
+    industryProblem:
+      process.env.INDUSTRY_PROBLEM ||
+      'relying on a standard contact form to capture incoming customer inquiries',
     mergeExports: toBool(process.env.SCRAPER_MERGE_EXPORTS, false),
   }
 }

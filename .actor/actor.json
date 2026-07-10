@@ -1,7 +1,7 @@
 {
     "actorSpecification": 1,
     "name": "closet-scraper",
-    "title": "ClosetQuote Scraper",
+    "title": "DitchTheForm Scraper",
     "description": "Scrapes Google Maps and social media for custom closet contractor leads.",
     "version": "1.0",
     "meta": {

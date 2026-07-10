@@ -18,6 +18,11 @@ import {
   type CampaignBlueprint,
 } from './campaigns.js'
 
+// Vertical/industry templating (defaults preserve original custom-closet copy).
+const BRAND = process.env.BRAND_NAME || 'ClosetQuote'
+const BRAND_DOMAIN = process.env.BRAND_DOMAIN || 'www.closetquotes.com'
+const INDUSTRY = process.env.INDUSTRY_NAME || 'custom closet'
+
 export interface ExportArtifacts {
   runId: string
   directory: string
@@ -349,9 +354,9 @@ function buildSmsOutreachRows(leads: QualifiedLead[]): SmsOutreachRow[] {
 
     let suggestedSms: string
     if (hasWebsite) {
-      suggestedSms = `Hi! I\'m Joseph from ClosetQuote. I build interactive pricing calculators for custom closet contractors — it embeds on your site, lets homeowners get instant estimates, and texts you the lead details. Looking for a few local businesses to try it free for 30 days. Mind if I send a quick demo video?`
+      suggestedSms = `Hi! I\'m Joseph from ${BRAND}. I build interactive pricing calculators for ${INDUSTRY} contractors — it embeds on your site, lets homeowners get instant estimates, and texts you the lead details. Looking for a few local businesses to try it free for 30 days. Mind if I send a quick demo video?`
     } else {
-      suggestedSms = `Hi! Joseph from ClosetQuote here. I noticed ${companyName} needs a website! We build bespoke, beautiful, responsive sites for closet contractors and embed our interactive pricing widget right on it to capture leads. Play with the demo at www.closetquotes.com. Got 5 mins for a quick call to discuss?`
+      suggestedSms = `Hi! Joseph from ${BRAND} here. I noticed ${companyName} needs a website! We build bespoke, beautiful, responsive sites for ${INDUSTRY} contractors and embed our interactive pricing widget right on it to capture leads. Play with the demo at ${BRAND_DOMAIN}. Got 5 mins for a quick call to discuss?`
     }
 
     rows.push({
