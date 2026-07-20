@@ -22,6 +22,18 @@ const QUOTE_INPUTS = process.env.INDUSTRY_QUOTE_INPUTS || 'their linear footage 
 const LEAD_INPUTS = process.env.INDUSTRY_LEAD_INPUTS || 'room measurements and material selections'
 const PRICING_MATRIX = process.env.INDUSTRY_PRICING_MATRIX || 'room pricing matrix'
 
+/** Live demo / video links for positive-reply templates. */
+export const OUTREACH_LOOM_URL = (process.env.OUTREACH_LOOM_URL || '').trim()
+export const OUTREACH_LANDING_URL = (
+  process.env.OUTREACH_LANDING_URL || `https://${BRAND_DOMAIN}`
+).trim()
+
+function withOutreachLinks(body: string): string {
+  return body
+    .replaceAll('[INSERT_LOOM_LINK]', OUTREACH_LOOM_URL || '[INSERT_LOOM_LINK]')
+    .replaceAll('[INSERT_LANDING_PAGE_LINK]', OUTREACH_LANDING_URL || '[INSERT_LANDING_PAGE_LINK]')
+}
+
 export type CampaignSequenceStep = {
   step: number
   waitDaysAfterPrevious: number
@@ -100,8 +112,9 @@ export const PIPELINE_A_CAMPAIGN: CampaignBlueprint = {
     },
   ],
   positiveReply: {
-    body:
-      `Awesome, appreciate you getting back to me, {First Name}.\n\nHere is the 60-second video showing exactly how it embeds on a site and texts you the lead: [INSERT_LOOM_LINK]\n\nYou can also play with a live sandbox version on your phone right here to see exactly what your customers would see: [INSERT_LANDING_PAGE_LINK]\n\nIf you want to drop this on your site today, you can grab your 30-day free beta account here (no credit card required). Just let me know if you want me to help you configure your specific ${PRICING_MATRIX}.\n\nBest,\nJoseph`,
+    body: withOutreachLinks(
+      `Awesome, appreciate you getting back to me, {First Name}.\n\nHere is the 60-second video showing exactly how it embeds on a site and texts you the lead: [INSERT_LOOM_LINK]\n\nYou can also play with a live sandbox version on your phone right here to see exactly what your customers would see: [INSERT_LANDING_PAGE_LINK]\n\nIf you want to drop this on your site today, you can grab your 30-day free beta account here (no credit card required). Just let me know if you want me to help you configure your specific ${PRICING_MATRIX}.\n\nBest,\nJoseph`
+    ),
   },
 }
 
@@ -140,11 +153,24 @@ export const PIPELINE_B_CAMPAIGN: CampaignBlueprint = {
     },
   ],
   positiveReply: {
-    body:
-      "Great to connect, {First Name}.\n\nBefore we talk layouts and design, I want to show you the actual lead-capture engine that comes built natively into the sites I make.\n\nYou can test drive a live sandbox of the calculator here: [INSERT_LANDING_PAGE_LINK]\n\nImagine a homeowner landing on your new digital portfolio, playing with that widget, and their exact measurements and contact info immediately buzzing your cell phone.\n\nI'd love to throw together a quick, custom layout mockup for {Company Name} so you can see what it looks like with your branding. Are you around for a quick 10-minute call this Tuesday or Wednesday to talk about the style you're looking for?\n\nBest,\nJoseph",
+    body: withOutreachLinks(
+      "Great to connect, {First Name}.\n\nBefore we talk layouts and design, I want to show you the actual lead-capture engine that comes built natively into the sites I make.\n\nYou can test drive a live sandbox of the calculator here: [INSERT_LANDING_PAGE_LINK]\n\nImagine a homeowner landing on your new digital portfolio, playing with that widget, and their exact measurements and contact info immediately buzzing your cell phone.\n\nI'd love to throw together a quick, custom layout mockup for {Company Name} so you can see what it looks like with your branding. Are you around for a quick 10-minute call this Tuesday or Wednesday to talk about the style you're looking for?\n\nBest,\nJoseph"
+    ),
   },
 }
 
 export function campaignForPipeline(pipeline: Pipeline): CampaignBlueprint {
   return pipeline === 'PIPELINE_A' ? PIPELINE_A_CAMPAIGN : PIPELINE_B_CAMPAIGN
+}
+
+/** True when Loom/landing placeholders remain in campaign copy. */
+export function campaignCopyHasPlaceholders(blueprint: CampaignBlueprint): boolean {
+  const blobs = [
+    ...blueprint.sequence.map((s) => s.body),
+    blueprint.positiveReply.body,
+    ...(blueprint.smsTemplates || []).map((s) => s.body),
+  ]
+  return blobs.some(
+    (b) => b.includes('[INSERT_LOOM_LINK]') || b.includes('[INSERT_LANDING_PAGE_LINK]')
+  )
 }

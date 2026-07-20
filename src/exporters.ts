@@ -15,6 +15,7 @@ import {
   PIPELINE_B_CAMPAIGN,
   CAMPAIGN_SCHEDULE,
   CAMPAIGN_SAFETY,
+  campaignCopyHasPlaceholders,
   type CampaignBlueprint,
 } from './campaigns.js'
 
@@ -505,9 +506,18 @@ function buildInstantlyCampaignPlaybook(params: {
     '- [ ] Confirm variable mapping for Email, First Name, Company Name, Website',
     '- [ ] Paste sequence copy and follow-up timing',
     '- [ ] Apply safety controls',
-    '- [ ] Insert Loom and landing page links in positive-reply templates',
+    '- [ ] Set OUTREACH_LOOM_URL / OUTREACH_LANDING_URL (no [INSERT_*] placeholders left)',
     '- [ ] Start both campaigns',
     '',
+    ...(campaignCopyHasPlaceholders(PIPELINE_A_CAMPAIGN) ||
+    campaignCopyHasPlaceholders(PIPELINE_B_CAMPAIGN)
+      ? [
+          '## WARNING',
+          '- Positive-reply templates still contain [INSERT_LOOM_LINK] and/or [INSERT_LANDING_PAGE_LINK].',
+          '- Set OUTREACH_LOOM_URL and OUTREACH_LANDING_URL before sending.',
+          '',
+        ]
+      : []),
   ].join('\n')
 }
 

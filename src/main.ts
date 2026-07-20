@@ -313,24 +313,34 @@ async function main() {
 
         const pipelineALeads = getLeadsByPipeline('PIPELINE_A')
         const pipelineBLeads = getLeadsByPipeline('PIPELINE_B')
+        // Pipeline B with email → Instantly; phone-only → SMS outreach.
+        const pipelineBEmailLeads = pipelineBLeads.filter((lead) => {
+            const email = (
+                lead.enrichment.decisionMakerEmail ||
+                lead.enrichment.primaryEmail ||
+                ''
+            ).trim()
+            return Boolean(email)
+        })
+        const pipelineBSmsLeads = pipelineBLeads.filter((lead) => {
+            const email = (
+                lead.enrichment.decisionMakerEmail ||
+                lead.enrichment.primaryEmail ||
+                ''
+            ).trim()
+            return !email && Boolean((lead.phoneNumber || '').trim())
+        })
 
-        const [pipelineAResult, pipelineBResult] = config.disableWebhooks
-            ? [
-                    {
-                        pipeline: 'PIPELINE_A',
-                        urlConfigured: false,
-                        attemptedBatches: 0,
-                        successfulBatches: 0,
-                        failedBatches: 0,
-                    },
-                    {
-                        pipeline: 'PIPELINE_B',
-                        urlConfigured: false,
-                        attemptedBatches: 0,
-                        successfulBatches: 0,
-                        failedBatches: 0,
-                    },
-                ]
+        const emptyWebhook = (pipeline: 'PIPELINE_A' | 'PIPELINE_B') => ({
+            pipeline,
+            urlConfigured: false,
+            attemptedBatches: 0,
+            successfulBatches: 0,
+            failedBatches: 0,
+        })
+
+        const [pipelineAResult, pipelineBResult, smsResult] = config.disableWebhooks
+            ? [emptyWebhook('PIPELINE_A'), emptyWebhook('PIPELINE_B'), emptyWebhook('PIPELINE_B')]
             : await Promise.all([
                     dispatchToWebhook('PIPELINE_A', config.pipelineAWebhookUrl, pipelineALeads, {
                         batchSize: config.webhookBatchSize,
@@ -338,7 +348,13 @@ async function main() {
                         authToken: config.webhookAuthToken,
                         runId: artifacts.runId,
                     }),
-                    dispatchToWebhook('PIPELINE_B', config.pipelineBWebhookUrl, pipelineBLeads, {
+                    dispatchToWebhook('PIPELINE_B', config.pipelineBWebhookUrl, pipelineBEmailLeads, {
+                        batchSize: config.webhookBatchSize,
+                        authHeader: config.webhookAuthHeader,
+                        authToken: config.webhookAuthToken,
+                        runId: artifacts.runId,
+                    }),
+                    dispatchToWebhook('PIPELINE_B', config.smsOutreachWebhookUrl, pipelineBSmsLeads, {
                         batchSize: config.webhookBatchSize,
                         authHeader: config.webhookAuthHeader,
                         authToken: config.webhookAuthToken,
@@ -349,13 +365,15 @@ async function main() {
         log.info('Scrape run finished', {
             stats,
             artifacts,
-            webhooks: [pipelineAResult, pipelineBResult],
+            webhooks: [pipelineAResult, pipelineBResult, { channel: 'sms', ...smsResult }],
+            pipelineBEmailCount: pipelineBEmailLeads.length,
+            pipelineBSmsCount: pipelineBSmsLeads.length,
         })
 
         await postRunStatus(config, 'completed', artifacts.runId, {
             stats,
             leads: allLeads,
-            webhooks: [pipelineAResult, pipelineBResult],
+            webhooks: [pipelineAResult, pipelineBResult, { channel: 'sms', ...smsResult }],
             artifacts,
             targetLocations: config.targetLocations,
             selectedCities: config.targetLocations,

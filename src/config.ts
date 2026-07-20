@@ -74,6 +74,8 @@ export interface ScraperConfig {
   targetLocations: string[]
   pipelineAWebhookUrl: string
   pipelineBWebhookUrl: string
+  /** Phone-only Pipeline B leads → dashboard /api/sms-outreach */
+  smsOutreachWebhookUrl: string
   webhookBatchSize: number
   webhookAuthHeader: string
   webhookAuthToken: string
@@ -145,6 +147,7 @@ function loadEnvConfig(): ScraperConfig {
       : DEFAULT_LOCATIONS,
     pipelineAWebhookUrl: process.env.INSTANTLY_PIPELINE_A_WEBHOOK_URL || '',
     pipelineBWebhookUrl: process.env.INSTANTLY_PIPELINE_B_WEBHOOK_URL || '',
+    smsOutreachWebhookUrl: process.env.SMS_OUTREACH_WEBHOOK_URL || '',
     webhookBatchSize: toInt(process.env.WEBHOOK_BATCH_SIZE, 50),
     webhookAuthHeader: process.env.WEBHOOK_AUTH_HEADER || 'Authorization',
     webhookAuthToken: process.env.WEBHOOK_AUTH_TOKEN || '',
@@ -255,6 +258,9 @@ function mergeRemoteConfig(base: ScraperConfig, remote: Record<string, unknown>)
   }
   if ('pipelineBWebhookUrl' in remote && typeof remote.pipelineBWebhookUrl === 'string') {
     next.pipelineBWebhookUrl = remote.pipelineBWebhookUrl.trim()
+  }
+  if ('smsOutreachWebhookUrl' in remote && typeof remote.smsOutreachWebhookUrl === 'string') {
+    next.smsOutreachWebhookUrl = remote.smsOutreachWebhookUrl.trim()
   }
   if ('webhookAuthHeader' in remote && typeof remote.webhookAuthHeader === 'string') {
     next.webhookAuthHeader = remote.webhookAuthHeader.trim() || next.webhookAuthHeader
