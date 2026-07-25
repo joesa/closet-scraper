@@ -12,8 +12,8 @@ import type { Pipeline } from './types.js'
 // Vertical/industry templating. Defaults preserve the original custom-closet
 // copy so existing runs are byte-for-byte unchanged; override via env to target
 // any service trade (plumbing, towing, landscaping, pressure washing…).
-const BRAND = process.env.BRAND_NAME || 'ClosetQuote'
-const BRAND_DOMAIN = process.env.BRAND_DOMAIN || 'closetquotes.com'
+const BRAND = process.env.BRAND_NAME || 'DitchTheForm'
+const BRAND_DOMAIN = process.env.BRAND_DOMAIN || 'ditchtheform.com'
 const INDUSTRY = process.env.INDUSTRY_NAME || 'custom storage and closet'
 const INDUSTRY_PROBLEM =
   process.env.INDUSTRY_PROBLEM ||

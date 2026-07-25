@@ -85,7 +85,7 @@ Remote control-plane (optional):
 - If `SCRAPER_RUN_STATUS_URL` is set, scraper posts `started`, `completed`, and
 	`failed` lifecycle events to dashboard (`/api/scraper/run-status`) for monitoring.
 - Prefer your production custom domain for these URLs (for example,
-	`https://www.closetquotes.com`) rather than `*.vercel.app`.
+	`https://www.ditchtheform.com`) rather than `*.vercel.app`.
 - If your production domain is protected by Vercel Deployment Protection,
 	set `SCRAPER_VERCEL_BYPASS_SECRET` and scraper will send the
 	`x-vercel-protection-bypass` header automatically.

@@ -20,8 +20,8 @@ import {
 } from './campaigns.js'
 
 // Vertical/industry templating (defaults preserve original custom-closet copy).
-const BRAND = process.env.BRAND_NAME || 'ClosetQuote'
-const BRAND_DOMAIN = process.env.BRAND_DOMAIN || 'www.closetquotes.com'
+const BRAND = process.env.BRAND_NAME || 'DitchTheForm'
+const BRAND_DOMAIN = process.env.BRAND_DOMAIN || 'www.ditchtheform.com'
 const INDUSTRY = process.env.INDUSTRY_NAME || 'custom closet'
 
 export interface ExportArtifacts {
