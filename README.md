@@ -185,11 +185,27 @@ To reduce blocks / captchas:
 
 This scraper is a batch-style worker built with Crawlee, so it deploys natively to the Apify platform.
 
-### 1) Push to Apify
+### Automated production deployment
+
+Every push to `master` runs `.github/workflows/deploy-apify.yml`. GitHub Actions
+installs dependencies, runs the full test suite, compiles the scraper, and only
+then deploys the Actor with the `latest` build tag. The workflow fails if the
+Apify build does not finish successfully, so the commit's **Test and deploy
+scraper** check is the production deployment status.
+
+The repository must have an Actions secret named `APIFY_TOKEN`. Create the token
+in Apify Console under **Settings -> Integrations**, then add it in GitHub under
+**Settings -> Secrets and variables -> Actions -> Repository secrets**. The
+workflow can also be rerun manually from GitHub's **Actions** tab.
+
+Protect `master` with the **Test and deploy scraper** status check if pull
+requests are used. Do not manually retag a failed build as `latest`.
+
+### Manual fallback
 Use the Apify CLI to push this repo as an Actor:
 `npx apify-cli push`
 
-### 2) Configure Environment Variables
+### Configure Actor environment variables
 In the Apify Console, navigate to your new Actor -> **Source** tab -> **Environment Variables**.
 Set the following:
 - `SCRAPER_CONTROL_PLANE_CONFIG_URL`
@@ -198,5 +214,5 @@ Set the following:
 - `SCRAPER_RUN_STATUS_TOKEN`
 - `WEBHOOK_AUTH_TOKEN`
 
-### 3) Trigger from Dashboard
+### Trigger from Dashboard
 Update your Closet Dashboard's Vercel environment variables with `SCRAPER_TRIGGER_WEBHOOK_URL` pointing to the Apify Actor Run API endpoint. Your dashboard will now automatically configure and launch the Apify scraper on demand.

@@ -1,0 +1,74 @@
+name: Test and deploy Apify Actor
+
+on:
+  push:
+    branches:
+      - master
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+concurrency:
+  group: apify-production-deployment
+  cancel-in-progress: false
+
+jobs:
+  test-and-deploy:
+    name: Test and deploy scraper
+    runs-on: ubuntu-latest
+    timeout-minutes: 45
+
+    steps:
+      - name: Check out source
+        uses: actions/checkout@v4
+
+      - name: Set up Node.js
+        uses: actions/setup-node@v4
+        with:
+          node-version: 24
+          cache: npm
+
+      - name: Install dependencies
+        run: npm ci
+
+      - name: Run tests
+        run: npm test
+
+      - name: Build scraper
+        run: npm run build
+
+      - name: Verify deployment credentials
+        env:
+          APIFY_TOKEN: ${{ secrets.APIFY_TOKEN }}
+        run: |
+          if [ -z "$APIFY_TOKEN" ]; then
+            echo "::error::APIFY_TOKEN is not configured in this repository's Actions secrets."
+            exit 1
+          fi
+
+      - name: Deploy and build Actor
+        id: apify
+        uses: apify/push-actor-action@v1
+        with:
+          token: ${{ secrets.APIFY_TOKEN }}
+          build-tag: latest
+
+      - name: Verify Actor build
+        env:
+          BUILD_ID: ${{ steps.apify.outputs.build-id }}
+          BUILD_NUMBER: ${{ steps.apify.outputs.build-number }}
+          BUILD_STATUS: ${{ steps.apify.outputs.build-status }}
+        run: |
+          if [ "$BUILD_STATUS" != "SUCCEEDED" ]; then
+            echo "::error::Apify build $BUILD_ID finished with status $BUILD_STATUS."
+            exit 1
+          fi
+          {
+            echo "## Apify production deployment"
+            echo "- Commit: \`$GITHUB_SHA\`"
+            echo "- Build ID: \`$BUILD_ID\`"
+            echo "- Build number: \`$BUILD_NUMBER\`"
+            echo "- Build tag: \`latest\`"
+            echo "- Status: \`$BUILD_STATUS\`"
+          } >> "$GITHUB_STEP_SUMMARY"
