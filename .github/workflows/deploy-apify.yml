@@ -66,6 +66,7 @@ jobs:
         uses: apify/push-actor-action@v1
         with:
           token: ${{ secrets.APIFY_TOKEN }}
+          actor-id: ${{ vars.APIFY_ACTOR_ID }}
           build-tag: latest
 
       - name: Verify Actor build

@@ -194,10 +194,12 @@ compiles the scraper, and only then deploys the Actor with the `latest` build
 tag. The deployment check fails if the Apify build does not finish
 successfully, so it is the production deployment status for that commit.
 
-The repository must have an Actions secret named `APIFY_TOKEN`. Create the token
-in Apify Console under **Settings -> Integrations**, then add it in GitHub under
-**Settings -> Secrets and variables -> Actions -> Repository secrets**. The
-workflow can also be rerun manually from GitHub's **Actions** tab.
+The repository must have an Actions secret named `APIFY_TOKEN` and an Actions
+variable named `APIFY_ACTOR_ID`. Create the token in Apify Console under
+**Settings -> Integrations**, then add it in GitHub under **Settings -> Secrets
+and variables -> Actions**. `APIFY_ACTOR_ID` must identify the existing
+production Actor so a similarly named duplicate cannot be created. The workflow
+can also be rerun manually from GitHub's **Actions** tab.
 
 Protect `master` with the **Test scraper** status check if pull requests are
 used. Do not manually retag a failed build as `latest`.
