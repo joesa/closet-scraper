@@ -82,17 +82,22 @@ jobs:
           fi
           echo "build-id=$previous_build_id" >> "$GITHUB_OUTPUT"
 
-      - name: Deploy and build Actor
-        id: apify
-        continue-on-error: true
-        uses: apify/push-actor-action@v1
+      - name: Set up Apify CLI
+        uses: apify/setup-apify-cli-action@v1
         with:
           token: ${{ secrets.APIFY_TOKEN }}
-          actor-id: ${{ vars.APIFY_ACTOR_ID }}
-          build-tag: latest
+
+      - name: Deploy and build Actor
+        env:
+          APIFY_ACTOR_ID: ${{ vars.APIFY_ACTOR_ID }}
+        run: |
+          apify push \
+            --json \
+            --wait-for-finish=999999 \
+            --build-tag=latest \
+            "$APIFY_ACTOR_ID" > "$RUNNER_TEMP/apify-build.json"
 
       - name: Verify production Actor build
-        if: always()
         env:
           APIFY_ACTOR_ID: ${{ vars.APIFY_ACTOR_ID }}
           APIFY_TOKEN: ${{ secrets.APIFY_TOKEN }}
