@@ -4,6 +4,9 @@ on:
   push:
     branches:
       - master
+  pull_request:
+    branches:
+      - master
   workflow_dispatch:
 
 permissions:
@@ -14,17 +17,17 @@ concurrency:
   cancel-in-progress: false
 
 jobs:
-  test-and-deploy:
-    name: Test and deploy scraper
+  test:
+    name: Test scraper
     runs-on: ubuntu-latest
-    timeout-minutes: 45
+    timeout-minutes: 20
 
     steps:
       - name: Check out source
-        uses: actions/checkout@v4
+        uses: actions/checkout@v5
 
       - name: Set up Node.js
-        uses: actions/setup-node@v4
+        uses: actions/setup-node@v6
         with:
           node-version: 24
           cache: npm
@@ -37,6 +40,17 @@ jobs:
 
       - name: Build scraper
         run: npm run build
+
+  deploy:
+    name: Deploy scraper to Apify
+    if: github.event_name != 'pull_request'
+    needs: test
+    runs-on: ubuntu-latest
+    timeout-minutes: 30
+
+    steps:
+      - name: Check out source
+        uses: actions/checkout@v5
 
       - name: Verify deployment credentials
         env:

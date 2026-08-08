@@ -187,19 +187,20 @@ This scraper is a batch-style worker built with Crawlee, so it deploys natively 
 
 ### Automated production deployment
 
-Every push to `master` runs `.github/workflows/deploy-apify.yml`. GitHub Actions
-installs dependencies, runs the full test suite, compiles the scraper, and only
-then deploys the Actor with the `latest` build tag. The workflow fails if the
-Apify build does not finish successfully, so the commit's **Test and deploy
-scraper** check is the production deployment status.
+Every pull request to `master` runs the **Test scraper** check. Every push to
+`master` runs that same check and, after it passes, runs **Deploy scraper to
+Apify**. GitHub Actions installs dependencies, runs the full test suite,
+compiles the scraper, and only then deploys the Actor with the `latest` build
+tag. The deployment check fails if the Apify build does not finish
+successfully, so it is the production deployment status for that commit.
 
 The repository must have an Actions secret named `APIFY_TOKEN`. Create the token
 in Apify Console under **Settings -> Integrations**, then add it in GitHub under
 **Settings -> Secrets and variables -> Actions -> Repository secrets**. The
 workflow can also be rerun manually from GitHub's **Actions** tab.
 
-Protect `master` with the **Test and deploy scraper** status check if pull
-requests are used. Do not manually retag a failed build as `latest`.
+Protect `master` with the **Test scraper** status check if pull requests are
+used. Do not manually retag a failed build as `latest`.
 
 ### Manual fallback
 Use the Apify CLI to push this repo as an Actor:
