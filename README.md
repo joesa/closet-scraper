@@ -193,6 +193,8 @@ Apify**. GitHub Actions installs dependencies, runs the full test suite,
 compiles the scraper, and only then deploys the Actor with the `latest` build
 tag. The deployment check fails if the Apify build does not finish
 successfully, so it is the production deployment status for that commit.
+The workflow confirms the newly tagged build through Apify's API instead of
+depending only on the CLI wrapper's reported status.
 
 The repository must have an Actions secret named `APIFY_TOKEN` and an Actions
 variable named `APIFY_ACTOR_ID`. Create the token in Apify Console under

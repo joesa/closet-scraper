@@ -54,36 +54,74 @@ jobs:
 
       - name: Verify deployment credentials
         env:
+          APIFY_ACTOR_ID: ${{ vars.APIFY_ACTOR_ID }}
           APIFY_TOKEN: ${{ secrets.APIFY_TOKEN }}
         run: |
           if [ -z "$APIFY_TOKEN" ]; then
             echo "::error::APIFY_TOKEN is not configured in this repository's Actions secrets."
             exit 1
           fi
+          if [ -z "$APIFY_ACTOR_ID" ]; then
+            echo "::error::APIFY_ACTOR_ID is not configured in this repository's Actions variables."
+            exit 1
+          fi
+
+      - name: Read current production build
+        id: before
+        env:
+          APIFY_ACTOR_ID: ${{ vars.APIFY_ACTOR_ID }}
+          APIFY_TOKEN: ${{ secrets.APIFY_TOKEN }}
+        run: |
+          response=$(curl --fail --silent --show-error \
+            --header "Authorization: Bearer $APIFY_TOKEN" \
+            "https://api.apify.com/v2/acts/$APIFY_ACTOR_ID")
+          previous_build_id=$(jq -r '.data.taggedBuilds.latest.buildId // empty' <<< "$response")
+          if [ -z "$previous_build_id" ]; then
+            echo "::error::The production Actor has no current latest build."
+            exit 1
+          fi
+          echo "build-id=$previous_build_id" >> "$GITHUB_OUTPUT"
 
       - name: Deploy and build Actor
         id: apify
+        continue-on-error: true
         uses: apify/push-actor-action@v1
         with:
           token: ${{ secrets.APIFY_TOKEN }}
           actor-id: ${{ vars.APIFY_ACTOR_ID }}
           build-tag: latest
 
-      - name: Verify Actor build
+      - name: Verify production Actor build
+        if: always()
         env:
-          BUILD_ID: ${{ steps.apify.outputs.build-id }}
-          BUILD_NUMBER: ${{ steps.apify.outputs.build-number }}
-          BUILD_STATUS: ${{ steps.apify.outputs.build-status }}
+          APIFY_ACTOR_ID: ${{ vars.APIFY_ACTOR_ID }}
+          APIFY_TOKEN: ${{ secrets.APIFY_TOKEN }}
+          PREVIOUS_BUILD_ID: ${{ steps.before.outputs.build-id }}
         run: |
-          if [ "$BUILD_STATUS" != "SUCCEEDED" ]; then
-            echo "::error::Apify build $BUILD_ID finished with status $BUILD_STATUS."
+          actor_response=$(curl --fail --silent --show-error \
+            --header "Authorization: Bearer $APIFY_TOKEN" \
+            "https://api.apify.com/v2/acts/$APIFY_ACTOR_ID")
+          build_id=$(jq -r '.data.taggedBuilds.latest.buildId // empty' <<< "$actor_response")
+          build_number=$(jq -r '.data.taggedBuilds.latest.buildNumber // empty' <<< "$actor_response")
+          if [ -z "$build_id" ] || [ "$build_id" = "$PREVIOUS_BUILD_ID" ]; then
+            echo "::error::Apify did not promote a new build to the latest tag."
             exit 1
           fi
+
+          build_response=$(curl --fail --silent --show-error \
+            --header "Authorization: Bearer $APIFY_TOKEN" \
+            "https://api.apify.com/v2/actor-builds/$build_id")
+          build_status=$(jq -r '.data.status // empty' <<< "$build_response")
+          if [ "$build_status" != "SUCCEEDED" ]; then
+            echo "::error::Apify build $build_id finished with status $build_status."
+            exit 1
+          fi
+
           {
             echo "## Apify production deployment"
             echo "- Commit: \`$GITHUB_SHA\`"
-            echo "- Build ID: \`$BUILD_ID\`"
-            echo "- Build number: \`$BUILD_NUMBER\`"
+            echo "- Build ID: \`$build_id\`"
+            echo "- Build number: \`$build_number\`"
             echo "- Build tag: \`latest\`"
-            echo "- Status: \`$BUILD_STATUS\`"
+            echo "- Status: \`$build_status\`"
           } >> "$GITHUB_STEP_SUMMARY"
