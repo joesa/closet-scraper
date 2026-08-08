@@ -8,7 +8,10 @@ Google Maps lead extraction and enrichment worker for DitchTheForm outbound.
 2. Opens each query in a PlaywrightCrawler and scrolls Maps results (detecting and retrying through Google CAPTCHA / "unusual traffic" walls).
 3. Visits each business place URL and extracts lead fields:
 	- Business name
+	- Primary and additional business categories
+	- Listed services (with category/search-keyword fallback provenance)
 	- Website URL
+	- Social profile URL (kept separate from an owned website)
 	- Phone number
 	- Address
 	- Rating text
@@ -32,7 +35,9 @@ Copy `.env.example` to `.env`, then configure:
 - `START_URLS`: optional direct Google Maps search URLs for one-off testing.
 - `DISABLE_WEBHOOKS`: set `true` to skip Instantly delivery and test scraping only.
 - `MAPS_KEYWORDS`: comma-separated vertical terms.
-- `TARGET_LOCATIONS`: comma-separated cities/areas.
+- `TARGET_LOCATIONS`: comma-separated cities, states, ZIP codes, or areas.
+- `NO_WEBSITE_ONLY`, `PHONE_REQUIRED`, `REQUIRE_CATEGORY_MATCH`
+- `MIN_RATING`, `MIN_REVIEW_COUNT`, `SEARCH_RADIUS_MILES`
 - `INSTANTLY_PIPELINE_A_WEBHOOK_URL`
 - `INSTANTLY_PIPELINE_B_WEBHOOK_URL`
 

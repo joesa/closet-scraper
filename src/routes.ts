@@ -2,6 +2,7 @@ import { createPlaywrightRouter } from 'crawlee'
 
 import type { ScraperConfig } from './config.js'
 import { classifyLeadWebsite, guessAndVerifyFallbackEmails } from './enrichment.js'
+import { leadFilterFailure, normalizeBusinessDetails } from './lead-quality.js'
 import { upsertLead } from './state.js'
 import type { QualifiedLead, RawLead, SearchSeed } from './types.js'
 
@@ -162,6 +163,41 @@ function normalizeWebsiteFromMaps(input: string | null): string | null {
     }
 }
 
+function isSocialProfileUrl(input: string | null): boolean {
+    if (!input) return false
+    try {
+        const hostname = new URL(input).hostname.toLowerCase().replace(/^www\./, '')
+        return hostname === 'facebook.com' || hostname.endsWith('.facebook.com') ||
+            hostname === 'instagram.com' || hostname.endsWith('.instagram.com')
+    } catch {
+        return false
+    }
+}
+
+async function extractExpandedServices(page: any): Promise<string[]> {
+    try {
+        const servicesControl = page
+            .locator('button, [role="tab"]')
+            .filter({ hasText: /^Services$/i })
+            .first()
+        if (await servicesControl.count() === 0 || !(await servicesControl.isVisible())) return []
+        await servicesControl.click({ timeout: 3000 })
+        await page.waitForTimeout(750)
+        return await page.evaluate(() => {
+            const root = document.querySelector('[role="dialog"]') as HTMLElement | null
+            if (!root) return []
+            const ignored = /^(services|close|back|done|learn more|add a service)$/i
+            const values = (root.innerText || '')
+                .split(/\n+/)
+                .map((value) => value.replace(/\s+/g, ' ').trim())
+                .filter((value) => value && value.length <= 120 && !ignored.test(value))
+            return [...new Set(values)].slice(0, 30)
+        })
+    } catch {
+        return []
+    }
+}
+
 export function buildRouter(config: ScraperConfig) {
     const router = createPlaywrightRouter()
 
@@ -277,6 +313,42 @@ export function buildRouter(config: ScraperConfig) {
             const reviewTextFromAria = reviewNode?.getAttribute('aria-label') || null
             const reviewTextFromText = reviewNode?.textContent?.trim() || null
 
+            const clean = (value: string | null | undefined) =>
+                (value || '').replace(/\s+/g, ' ').trim()
+            const categoryNodes = Array.from(document.querySelectorAll(
+                'button[jsaction*="category"], button.DkEaL, [data-item-id*="category"]'
+            )) as HTMLElement[]
+            const categories = categoryNodes
+                .map((el) => clean(el.getAttribute('aria-label') || el.textContent))
+                .filter((value) => value && value.length <= 120)
+            const primaryCategory = categories[0] || null
+
+            const descriptionNode =
+                (document.querySelector('[data-item-id="description"]') as HTMLElement | null) ||
+                (document.querySelector('.PYvSYb') as HTMLElement | null) ||
+                (document.querySelector('[aria-label^="From the business"]') as HTMLElement | null)
+
+            const services = new Set<string>()
+            const serviceNodes = Array.from(document.querySelectorAll(
+                '[data-item-id*="service"], [aria-label^="Service:"], [aria-label^="Services:"]'
+            )) as HTMLElement[]
+            for (const node of serviceNodes) {
+                const raw = clean(node.getAttribute('aria-label') || node.textContent)
+                    .replace(/^services?:\s*/i, '')
+                if (raw && raw.length <= 120) services.add(raw)
+            }
+            const serviceHeadings = (Array.from(document.querySelectorAll('h2, h3, [role="heading"]')) as HTMLElement[])
+                .filter((el) => /^(services|service options|offerings)$/i.test(clean(el.textContent)))
+            for (const heading of serviceHeadings) {
+                const sectionText = (heading.parentElement?.innerText || '').split(/\n+/)
+                for (const line of sectionText) {
+                    const value = clean(line)
+                    if (!value || /^(services|service options|offerings)$/i.test(value) || value.length > 120) continue
+                    services.add(value)
+                    if (services.size >= 30) break
+                }
+            }
+
             return {
                 businessName: titleEl?.textContent?.trim() || null,
                 websiteUrl: websiteAnchor?.href || null,
@@ -285,8 +357,17 @@ export function buildRouter(config: ScraperConfig) {
                 address: addressButton?.textContent?.trim() || null,
                 ratingText: ratingTextFromText || ratingTextFromAria,
                 reviewText: reviewTextFromText || reviewTextFromAria,
+                primaryCategory,
+                additionalCategories: categories.slice(1),
+                services: [...services].slice(0, 30),
+                description: clean(descriptionNode?.textContent),
             }
         })
+
+        const expandedServices = await extractExpandedServices(page)
+        if (expandedServices.length > 0) {
+            scraped.services = [...new Set([...scraped.services, ...expandedServices])].slice(0, 30)
+        }
 
         const phoneNumber =
             parsePhoneFromAriaLabel(scraped.phoneAriaLabel) ||
@@ -299,18 +380,40 @@ export function buildRouter(config: ScraperConfig) {
             return
         }
 
+        const normalizedMapsUrl = normalizeWebsiteFromMaps(scraped.websiteUrl)
+        const mapsSocialProfileUrl = isSocialProfileUrl(normalizedMapsUrl) ? normalizedMapsUrl : null
+        const ownWebsiteUrl = mapsSocialProfileUrl ? null : normalizedMapsUrl
+        const businessDetails = normalizeBusinessDetails({
+            sourceKeyword: seed.keyword,
+            primaryCategory: scraped.primaryCategory,
+            additionalCategories: scraped.additionalCategories,
+            services: scraped.services,
+            description: scraped.description,
+        })
         const rawLead: RawLead = {
             sourceQuery: seed.query,
             sourceKeyword: seed.keyword,
             sourceLocation: seed.location,
             mapsPlaceUrl: normalizedPlaceUrl,
             businessName: scraped.businessName,
-            websiteUrl: normalizeWebsiteFromMaps(scraped.websiteUrl),
+            ...businessDetails,
+            websiteUrl: ownWebsiteUrl,
+            socialProfileUrl: mapsSocialProfileUrl,
+            hasOwnWebsite: Boolean(ownWebsiteUrl),
             phoneNumber,
             address: scraped.address,
             ratingText: scraped.ratingText,
             ratingValue: parseRatingValue(scraped.ratingText),
             reviewCount: parseReviewCount(scraped.reviewText || scraped.ratingText),
+        }
+
+        const filterFailure = leadFilterFailure(rawLead, config)
+        if (filterFailure) {
+            log.info('Lead excluded by configured filters', {
+                business: rawLead.businessName,
+                reason: filterFailure,
+            })
+            return
         }
 
         if (!rawLead.websiteUrl && config.enableOmniFallback) {
@@ -319,6 +422,15 @@ export function buildRouter(config: ScraperConfig) {
             } else {
                 log.info('Lead missing website, engaging Omni-Channel fallback', { business: rawLead.businessName })
                 
+                if (rawLead.socialProfileUrl) {
+                    await addRequests([{
+                        url: rawLead.socialProfileUrl,
+                        label: 'SOCIAL_PROFILE_SCRAPE',
+                        userData: { seed, rawLead }
+                    }])
+                    return
+                }
+
                 // Construct Google Search URL for social profiles
                 const sq = encodeURIComponent(`site:facebook.com OR site:instagram.com "${rawLead.businessName}" "${seed.location}"`)
                 const searchUrl = `https://www.google.com/search?q=${sq}`
@@ -450,15 +562,15 @@ export function buildRouter(config: ScraperConfig) {
             const emailMatch = text.match(/([a-zA-Z0-9._-]+@[a-zA-Z0-9._-]+\.[a-zA-Z0-9_-]+)/)
             const extractedEmail = emailMatch ? emailMatch[1].trim().toLowerCase() : null
 
-            userData.rawLead.websiteUrl = request.url // Record the social profile as their website
+            userData.rawLead.socialProfileUrl = request.url
 
             if (extractedEmail) {
                 log.info('Extracted email from social profile', { email: extractedEmail })
-                // Construct fake enrichment to push to Pipeline A
+                // A social profile is a contact channel, not an owned website.
                 const qualifiedLead: QualifiedLead = {
                     ...userData.rawLead,
                     enrichment: {
-                        pipeline: 'PIPELINE_A' as const,
+                        pipeline: 'PIPELINE_B' as const,
                         reason: 'social_profile_extraction' as const,
                         contactPageUrl: targetUrl,
                         primaryEmail: extractedEmail,
@@ -472,7 +584,7 @@ export function buildRouter(config: ScraperConfig) {
                         pagesScanned: [targetUrl],
                         confidenceScore: 80,
                         confidenceLabel: 'medium' as const,
-                        outreachRank: 'A2' as const,
+                        outreachRank: 'B1' as const,
                     }
                 }
                 upsertLead(qualifiedLead)
@@ -516,7 +628,7 @@ export function buildRouter(config: ScraperConfig) {
         }
 
         const enrichment = foundEmail ? {
-            pipeline: 'PIPELINE_A' as const,
+            pipeline: 'PIPELINE_B' as const,
             reason: 'smtp_domain_guessing' as const,
             contactPageUrl: null,
             primaryEmail: foundEmail,
@@ -530,7 +642,7 @@ export function buildRouter(config: ScraperConfig) {
             pagesScanned: [],
             confidenceScore: fallback?.confidence || 0,
             confidenceLabel: 'medium' as const,
-            outreachRank: 'A2' as const,
+            outreachRank: 'B1' as const,
         } : {
             pipeline: 'PIPELINE_B' as const,
             reason: 'missing_website' as const,

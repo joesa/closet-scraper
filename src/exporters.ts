@@ -54,7 +54,8 @@ export function nowRunId(): string {
 
 function csvEscape(value: unknown): string {
   if (value === null || value === undefined) return ''
-  const raw = String(value)
+  const input = String(value)
+  const raw = /^[=+\-@]/.test(input.trimStart()) ? `'${input}` : input
   if (/[",\n]/.test(raw)) {
     return `"${raw.replace(/"/g, '""')}"`
   }
@@ -119,8 +120,11 @@ type InstantlyRow = {
   decisionMakerEmail: string
   companyName: string
   website: string
+  socialProfile: string
   phone: string
   city: string
+  businessCategory: string
+  servicesProvided: string
   rating: string
   reviewCount: string
   pipeline: string
@@ -259,8 +263,11 @@ function leadsToInstantlyRows(
       decisionMakerEmail: lead.enrichment.decisionMakerEmail || '',
       companyName: lead.businessName || '',
       website: toDomain(lead.websiteUrl),
+      socialProfile: lead.socialProfileUrl || '',
       phone: lead.phoneNumber || '',
       city: parseCity(lead.address),
+      businessCategory: lead.businessCategory || '',
+      servicesProvided: lead.servicesProvided.join(';'),
       rating: lead.ratingValue != null ? String(lead.ratingValue) : '',
       reviewCount: lead.reviewCount != null ? String(lead.reviewCount) : '',
       pipeline: lead.enrichment.pipeline,
@@ -288,8 +295,11 @@ function instantlyRowsToCsv(rows: InstantlyRow[]): string {
     'decisionMakerEmail',
     'companyName',
     'website',
+    'socialProfile',
     'phone',
     'city',
+    'businessCategory',
+    'servicesProvided',
     'rating',
     'reviewCount',
     'pipeline',
@@ -351,7 +361,7 @@ function buildSmsOutreachRows(leads: QualifiedLead[]): SmsOutreachRow[] {
     if (!lead.phoneNumber) continue
 
     const companyName = lead.businessName || 'your company'
-    const hasWebsite = !!(lead.websiteUrl && lead.enrichment.reason !== 'missing_website')
+    const hasWebsite = lead.hasOwnWebsite
 
     let suggestedSms: string
     if (hasWebsite) {
@@ -537,7 +547,14 @@ function leadsToCsv(leads: QualifiedLead[]): string {
     'decisionMakerEmailSource',
     'allEmails',
     'businessName',
+    'businessCategory',
+    'additionalCategories',
+    'servicesProvided',
+    'servicesSource',
+    'businessDescription',
+    'hasOwnWebsite',
     'websiteUrl',
+    'socialProfileUrl',
     'phoneNumber',
     'address',
     'ratingText',
@@ -567,7 +584,14 @@ function leadsToCsv(leads: QualifiedLead[]): string {
       lead.enrichment.decisionMakerEmailSource,
       lead.enrichment.discoveredEmails.join(';'),
       lead.businessName,
+      lead.businessCategory,
+      lead.additionalCategories.join(';'),
+      lead.servicesProvided.join(';'),
+      lead.servicesSource,
+      lead.businessDescription,
+      lead.hasOwnWebsite,
       lead.websiteUrl,
+      lead.socialProfileUrl,
       lead.phoneNumber,
       lead.address,
       lead.ratingText,

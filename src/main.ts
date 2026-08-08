@@ -250,6 +250,14 @@ async function main() {
             proxyCount: healthyProxyUrls.length,
             configuredProxyCount: configuredProxyUrls.length,
             maxResultsPerQuery: config.maxResultsPerQuery,
+            filters: {
+                noWebsiteOnly: config.noWebsiteOnly,
+                phoneRequired: config.phoneRequired,
+                requireCategoryMatch: config.requireCategoryMatch,
+                minRating: config.minRating,
+                minReviewCount: config.minReviewCount,
+                searchRadiusMiles: config.searchRadiusMiles,
+            },
             usingStartUrls: config.startUrls.length > 0,
             webhooksDisabled: config.disableWebhooks,
         })
@@ -264,6 +272,14 @@ async function main() {
             usingStartUrls: config.startUrls.length > 0,
             webhooksDisabled: config.disableWebhooks,
             targetLocations: config.targetLocations,
+            filters: {
+                noWebsiteOnly: config.noWebsiteOnly,
+                phoneRequired: config.phoneRequired,
+                requireCategoryMatch: config.requireCategoryMatch,
+                minRating: config.minRating,
+                minReviewCount: config.minReviewCount,
+                searchRadiusMiles: config.searchRadiusMiles,
+            },
         })
 
         const startRequests = seeds.map((seed) => ({
@@ -377,6 +393,14 @@ async function main() {
             artifacts,
             targetLocations: config.targetLocations,
             selectedCities: config.targetLocations,
+            filters: {
+                noWebsiteOnly: config.noWebsiteOnly,
+                phoneRequired: config.phoneRequired,
+                requireCategoryMatch: config.requireCategoryMatch,
+                minRating: config.minRating,
+                minReviewCount: config.minReviewCount,
+                searchRadiusMiles: config.searchRadiusMiles,
+            },
         })
 
         // When running a per-city loop, aggregate all run exports into one

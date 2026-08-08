@@ -13,7 +13,14 @@ export interface RawLead {
   sourceLocation: string
   mapsPlaceUrl: string
   businessName: string | null
+  businessCategory: string | null
+  additionalCategories: string[]
+  servicesProvided: string[]
+  servicesSource: 'maps_services' | 'maps_category' | 'search_keyword'
+  businessDescription: string | null
   websiteUrl: string | null
+  socialProfileUrl: string | null
+  hasOwnWebsite: boolean
   phoneNumber: string | null
   address: string | null
   ratingText: string | null

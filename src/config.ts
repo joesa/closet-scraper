@@ -54,6 +54,12 @@ export interface ScraperConfig {
   maxRequestsPerCrawl: number
   maxRequestRetries: number
   maxResultsPerQuery: number
+  noWebsiteOnly: boolean
+  phoneRequired: boolean
+  requireCategoryMatch: boolean
+  minRating: number
+  minReviewCount: number
+  searchRadiusMiles: number
   maxConcurrency: number
   emailDiscoveryMaxPages: number
   emailDiscoverySecondPassPages: number
@@ -123,6 +129,12 @@ function loadEnvConfig(): ScraperConfig {
     maxRequestsPerCrawl: toInt(process.env.MAX_REQUESTS_PER_CRAWL, 500),
     maxRequestRetries: toInt(process.env.MAX_REQUEST_RETRIES, 3),
     maxResultsPerQuery: toInt(process.env.MAX_RESULTS_PER_QUERY, 120),
+    noWebsiteOnly: toBool(process.env.NO_WEBSITE_ONLY, false),
+    phoneRequired: toBool(process.env.PHONE_REQUIRED, false),
+    requireCategoryMatch: toBool(process.env.REQUIRE_CATEGORY_MATCH, false),
+    minRating: Math.max(0, Math.min(5, Number.parseFloat(process.env.MIN_RATING || '0') || 0)),
+    minReviewCount: Math.max(0, toInt(process.env.MIN_REVIEW_COUNT, 0)),
+    searchRadiusMiles: Math.max(0, Math.min(100, toInt(process.env.SEARCH_RADIUS_MILES, 0))),
     maxConcurrency: toInt(process.env.MAX_CONCURRENCY, 8),
     emailDiscoveryMaxPages: toInt(process.env.EMAIL_DISCOVERY_MAX_PAGES, 3),
     emailDiscoverySecondPassPages: toInt(process.env.EMAIL_DISCOVERY_SECOND_PASS_PAGES, 2),
@@ -245,6 +257,27 @@ function mergeRemoteConfig(base: ScraperConfig, remote: Record<string, unknown>)
     const value = safeRemoteInt(remote.maxResultsPerQuery)
     if (value !== null) next.maxResultsPerQuery = value
   }
+  if ('noWebsiteOnly' in remote) {
+    next.noWebsiteOnly = safeRemoteBool(remote.noWebsiteOnly) ?? next.noWebsiteOnly
+  }
+  if ('phoneRequired' in remote) {
+    next.phoneRequired = safeRemoteBool(remote.phoneRequired) ?? next.phoneRequired
+  }
+  if ('requireCategoryMatch' in remote) {
+    next.requireCategoryMatch = safeRemoteBool(remote.requireCategoryMatch) ?? next.requireCategoryMatch
+  }
+  if ('minRating' in remote) {
+    const value = Number.parseFloat(String(remote.minRating ?? ''))
+    if (Number.isFinite(value)) next.minRating = Math.max(0, Math.min(5, value))
+  }
+  if ('minReviewCount' in remote) {
+    const value = safeRemoteInt(remote.minReviewCount)
+    if (value !== null) next.minReviewCount = Math.max(0, value)
+  }
+  if ('searchRadiusMiles' in remote) {
+    const value = safeRemoteInt(remote.searchRadiusMiles)
+    if (value !== null) next.searchRadiusMiles = Math.max(0, Math.min(100, value))
+  }
   if ('maxRequestsPerCrawl' in remote) {
     const value = safeRemoteInt(remote.maxRequestsPerCrawl)
     if (value !== null) next.maxRequestsPerCrawl = value
@@ -318,7 +351,9 @@ export function buildSearchSeeds(config: ScraperConfig): SearchSeed[] {
 
   for (const keyword of config.mapsKeywords) {
     for (const location of config.targetLocations) {
-      const query = `${keyword} ${location}`.trim()
+      const query = config.searchRadiusMiles > 0
+        ? `${keyword} within ${config.searchRadiusMiles} miles of ${location}`.trim()
+        : `${keyword} ${location}`.trim()
       seeds.push({
         keyword,
         location,
