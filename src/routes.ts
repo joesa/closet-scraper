@@ -3,6 +3,11 @@ import { createPlaywrightRouter } from 'crawlee'
 import type { ScraperConfig } from './config.js'
 import { classifyLeadWebsite, guessAndVerifyFallbackEmails } from './enrichment.js'
 import { leadFilterFailure, normalizeBusinessDetails } from './lead-quality.js'
+import {
+    buildPublicProfileResearch,
+    publicProfileAboutUrl,
+    withoutPublicProfileResearch,
+} from './social-profile-research.js'
 import { upsertLead } from './state.js'
 import type { QualifiedLead, RawLead, SearchSeed } from './types.js'
 
@@ -464,7 +469,7 @@ export function buildRouter(config: ScraperConfig) {
         }
 
         upsertLead(qualifiedLead)
-        await pushData(qualifiedLead)
+        await pushData(withoutPublicProfileResearch(qualifiedLead))
 
         log.info('Qualified lead', {
             business: qualifiedLead.businessName,
@@ -546,17 +551,30 @@ export function buildRouter(config: ScraperConfig) {
         if (!userData.rawLead) return
 
         try {
-            let targetUrl = request.url
-            if (targetUrl.includes('facebook.com') && !targetUrl.includes('about')) {
-                // Try to bypass timeline to contact info
-                const u = new URL(targetUrl)
-                targetUrl = `${u.origin}${u.pathname.replace(/\/$/, '')}/about_contact_and_basic_info`
-            }
+            const targetUrl = publicProfileAboutUrl(request.url)
 
             await page.goto(targetUrl, { waitUntil: 'domcontentloaded', timeout: 30000 })
             await page.waitForTimeout(2000)
 
             const text = await page.evaluate(() => document.body.innerText)
+            if (config.publicSocialResearchEnabled) {
+                const publicResearch = buildPublicProfileResearch({
+                    requestedUrl: request.url,
+                    loadedUrl: page.url(),
+                    bodyText: text,
+                })
+                userData.rawLead.publicProfileResearch = publicResearch.research
+                if (publicResearch.research) {
+                    log.info('Captured minimized public profile prose', {
+                        sourceUrl: publicResearch.research.sourceUrl,
+                        chars: publicResearch.research.text.length,
+                    })
+                } else {
+                    log.info('Public profile prose was not retained', {
+                        reason: publicResearch.reason,
+                    })
+                }
+            }
             
             // Basic email regex extraction
             const emailMatch = text.match(/([a-zA-Z0-9._-]+@[a-zA-Z0-9._-]+\.[a-zA-Z0-9_-]+)/)
@@ -565,7 +583,7 @@ export function buildRouter(config: ScraperConfig) {
             userData.rawLead.socialProfileUrl = request.url
 
             if (extractedEmail) {
-                log.info('Extracted email from social profile', { email: extractedEmail })
+                log.info('Extracted a public contact email from social profile')
                 // A social profile is a contact channel, not an owned website.
                 const qualifiedLead: QualifiedLead = {
                     ...userData.rawLead,
@@ -588,7 +606,7 @@ export function buildRouter(config: ScraperConfig) {
                     }
                 }
                 upsertLead(qualifiedLead)
-                await pushData(qualifiedLead)
+                await pushData(withoutPublicProfileResearch(qualifiedLead))
             } else {
                 log.info('No email found on social profile, trying SMTP guess', { business: userData.rawLead.businessName })
                 await addRequests([{
@@ -667,7 +685,7 @@ export function buildRouter(config: ScraperConfig) {
         }
 
         upsertLead(qualifiedLead)
-        await pushData(qualifiedLead)
+        await pushData(withoutPublicProfileResearch(qualifiedLead))
     })
 
     return router

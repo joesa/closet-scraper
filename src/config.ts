@@ -99,6 +99,8 @@ export interface ScraperConfig {
   runStatusToken: string
   vercelProtectionBypassSecret: string
   enableOmniFallback: boolean
+  /** Explicit operator approval for retaining minimized public social prose. */
+  publicSocialResearchEnabled: boolean
   enableLumpyMailExport: boolean
   // Vertical/industry parameters used to template outreach copy so the same
   // pipeline can target any service trade (plumbing, towing, landscaping…).
@@ -180,6 +182,7 @@ function loadEnvConfig(): ScraperConfig {
       process.env.VERCEL_AUTOMATION_BYPASS_SECRET ||
       '',
     enableOmniFallback: toBool(process.env.ENABLE_OMNI_FALLBACK, true),
+    publicSocialResearchEnabled: toBool(process.env.PUBLIC_SOCIAL_RESEARCH_ENABLED, false),
     enableLumpyMailExport: toBool(process.env.ENABLE_LUMPY_MAIL_EXPORT, true),
     industryName: process.env.INDUSTRY_NAME || 'custom closet & storage',
     industryProblem:

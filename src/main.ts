@@ -13,6 +13,7 @@ import { configureDomainCache, flushDomainCache, loadDomainCache } from './domai
 import { mergeRunExports, nowRunId, writeRunArtifacts } from './exporters.js'
 import { getAllLeads, getLeadStats, getLeadsByPipeline } from './state.js'
 import { buildRouter } from './routes.js'
+import { withoutPublicProfileResearch } from './social-profile-research.js'
 import { dispatchToWebhook } from './webhooks.js'
 import { postRunStatus } from './run-status.js'
 
@@ -260,6 +261,7 @@ async function main() {
             },
             usingStartUrls: config.startUrls.length > 0,
             webhooksDisabled: config.disableWebhooks,
+            publicSocialResearchEnabled: config.publicSocialResearchEnabled,
         })
 
         await postRunStatus(config, 'started', runId, {
@@ -271,6 +273,7 @@ async function main() {
             maxResultsPerQuery: config.maxResultsPerQuery,
             usingStartUrls: config.startUrls.length > 0,
             webhooksDisabled: config.disableWebhooks,
+            publicSocialResearchEnabled: config.publicSocialResearchEnabled,
             targetLocations: config.targetLocations,
             filters: {
                 noWebsiteOnly: config.noWebsiteOnly,
@@ -318,17 +321,18 @@ async function main() {
         await crawler.run(startRequests)
 
         const allLeads = getAllLeads()
+        const durableLeads = allLeads.map(withoutPublicProfileResearch)
         const stats = getLeadStats()
         const artifacts = await writeRunArtifacts({
             runId,
             seeds,
-            leads: allLeads,
+            leads: durableLeads,
             stats,
             compliance,
         })
 
-        const pipelineALeads = getLeadsByPipeline('PIPELINE_A')
-        const pipelineBLeads = getLeadsByPipeline('PIPELINE_B')
+        const pipelineALeads = getLeadsByPipeline('PIPELINE_A').map(withoutPublicProfileResearch)
+        const pipelineBLeads = getLeadsByPipeline('PIPELINE_B').map(withoutPublicProfileResearch)
         // Pipeline B with email → Instantly; phone-only → SMS outreach.
         const pipelineBEmailLeads = pipelineBLeads.filter((lead) => {
             const email = (

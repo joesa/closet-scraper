@@ -7,6 +7,13 @@ export interface SearchSeed {
   searchUrl: string
 }
 
+export interface PublicProfileResearch {
+  sourceUrl: string
+  text: string
+  capturedAt: string
+  captureMethod: 'public_browser'
+}
+
 export interface RawLead {
   sourceQuery: string
   sourceKeyword: string
@@ -20,6 +27,8 @@ export interface RawLead {
   businessDescription: string | null
   websiteUrl: string | null
   socialProfileUrl: string | null
+  /** Minimized public business prose only; no media or contact details. */
+  publicProfileResearch?: PublicProfileResearch | null
   hasOwnWebsite: boolean
   phoneNumber: string | null
   address: string | null
