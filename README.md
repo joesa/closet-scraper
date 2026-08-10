@@ -64,6 +64,35 @@ Optional:
 - `SCRAPER_CONTROL_PLANE_CONFIG_URL`, `SCRAPER_CONTROL_PLANE_TOKEN`
 - `SCRAPER_CONTROL_PLANE_TIMEOUT_MS`
 - `SCRAPER_RUN_STATUS_URL`, `SCRAPER_RUN_STATUS_TOKEN`
+- `PUBLIC_SOCIAL_RESEARCH_ENABLED` (default `false`): after an operator has
+	reviewed applicable law and platform terms, retain minimized prose from a
+	publicly accessible Facebook or Yelp business profile for Spec Build research.
+
+## Public social research safeguards
+
+This capability is purpose-limited and disabled by default. Enabling it is an
+operational decision, not a determination that collection is lawful in every
+jurisdiction or permitted by every platform. Obtain legal review for the
+intended locations and use, and honor applicable platform terms and requests.
+
+When enabled, the worker:
+
+- reads only a profile already reached during normal lead enrichment;
+- never logs in, fills a login form, solves a challenge, or bypasses a private,
+	consent, checkpoint, or CAPTCHA screen;
+- accepts only HTTPS Facebook profiles and canonical Yelp `/biz/` pages;
+- retains no images, videos, comments, reactions, friend/follower lists, or
+	hidden API responses;
+- redacts email addresses and phone numbers, removes browser chrome and URLs,
+	deduplicates lines, and caps temporary prose at 12,000 characters;
+- binds evidence to the exact expected profile before the dashboard accepts it;
+- uses exact evidence verification before any claim reaches generated copy;
+- erases the complete temporary profile body as soon as research is persisted,
+	retaining only accepted evidence excerpts and source metadata.
+
+If public access is unavailable, the record is discarded and the dashboard may
+use its indexed-search fallback. Do not alter these controls to work around a
+platform block.
 
 Webhook automation to Instantly:
 
