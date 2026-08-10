@@ -40,11 +40,48 @@ describe('buildPublicProfileResearch', () => {
     expect(result.research?.text.match(/^Home$/gm)).toBeNull()
   })
 
+  it('accepts a public Yelp business page with exact provenance', () => {
+    const result = buildPublicProfileResearch({
+      requestedUrl: 'https://www.yelp.com/biz/peerless-pressure-softwash-clarksville',
+      loadedUrl: 'https://www.yelp.com/biz/peerless-pressure-softwash-clarksville?sort_by=date_desc',
+      bodyText: BUSINESS_TEXT,
+    })
+
+    expect(result.research).toMatchObject({
+      sourceUrl: 'https://www.yelp.com/biz/peerless-pressure-softwash-clarksville',
+      captureMethod: 'public_browser',
+    })
+  })
+
+  it('drops Yelp customer reviews before evidence leaves the browser', () => {
+    const result = buildPublicProfileResearch({
+      requestedUrl: 'https://www.yelp.com/biz/peerless-pressure-softwash-clarksville',
+      loadedUrl: 'https://www.yelp.com/biz/peerless-pressure-softwash-clarksville',
+      bodyText: `${BUSINESS_TEXT}\nRecommended Reviews\nA customer said this was the best service ever.`,
+    })
+
+    expect(result.research?.text).toContain('We use soft washing')
+    expect(result.research?.text).not.toContain('A customer said')
+  })
+
+  it.each(['Reviews (14)', 'Review Highlights', 'Ask the Community']) (
+    'stops browser evidence at Yelp section variant %s',
+    (heading) => {
+      const result = buildPublicProfileResearch({
+        requestedUrl: 'https://www.yelp.com/biz/peerless-pressure-softwash-clarksville',
+        loadedUrl: 'https://www.yelp.com/biz/peerless-pressure-softwash-clarksville',
+        bodyText: `${BUSINESS_TEXT}\n${heading}\nCustomer prose`,
+      })
+      expect(result.research?.text).not.toContain('Customer prose')
+    }
+  )
+
   it.each([
     ['login redirect', 'https://www.facebook.com/login/', BUSINESS_TEXT],
     ['checkpoint redirect', 'https://www.facebook.com/checkpoint/123', BUSINESS_TEXT],
     ['private page', 'https://www.instagram.com/peerless/', `${BUSINESS_TEXT}\nThis account is private`],
     ['cross-platform redirect', 'https://www.instagram.com/peerless/', BUSINESS_TEXT],
+    ['Yelp challenge', 'https://www.yelp.com/challenge', BUSINESS_TEXT],
   ])('rejects %s', (_label, loadedUrl, bodyText) => {
     const result = buildPublicProfileResearch({
       requestedUrl: 'https://www.facebook.com/peerless/',
@@ -52,6 +89,23 @@ describe('buildPublicProfileResearch', () => {
       bodyText,
     })
     expect(result.research).toBeNull()
+  })
+
+  it('rejects non-business Yelp pages and cross-platform redirects', () => {
+    expect(
+      buildPublicProfileResearch({
+        requestedUrl: 'https://www.yelp.com/search?find_desc=pressure+washing',
+        loadedUrl: 'https://www.yelp.com/search?find_desc=pressure+washing',
+        bodyText: BUSINESS_TEXT,
+      }).research
+    ).toBeNull()
+    expect(
+      buildPublicProfileResearch({
+        requestedUrl: 'https://www.facebook.com/peerless/',
+        loadedUrl: 'https://www.yelp.com/biz/peerless-pressure-softwash-clarksville',
+        bodyText: BUSINESS_TEXT,
+      }).research
+    ).toBeNull()
   })
 
   it('rejects insecure, unsupported, and thin sources', () => {

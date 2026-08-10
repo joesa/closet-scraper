@@ -27,6 +27,7 @@ export interface RawLead {
   businessDescription: string | null
   websiteUrl: string | null
   socialProfileUrl: string | null
+  yelpUrl?: string | null
   /** Minimized public business prose only; no media or contact details. */
   publicProfileResearch?: PublicProfileResearch | null
   hasOwnWebsite: boolean

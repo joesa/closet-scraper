@@ -11,7 +11,7 @@ import { buildSearchSeeds, loadConfig } from './config.js'
 import type { ScraperConfig } from './config.js'
 import { configureDomainCache, flushDomainCache, loadDomainCache } from './domain-cache.js'
 import { mergeRunExports, nowRunId, writeRunArtifacts } from './exporters.js'
-import { getAllLeads, getLeadStats, getLeadsByPipeline } from './state.js'
+import { getAllLeads, getLeadStats, getLeadsByPipeline, resetLeadState } from './state.js'
 import { buildRouter } from './routes.js'
 import { withoutPublicProfileResearch } from './social-profile-research.js'
 import { dispatchToWebhook } from './webhooks.js'
@@ -199,6 +199,7 @@ async function main() {
     const preassignedRunId = (process.env.SCRAPER_TRIGGER_RUN_ID || '').trim()
     const runId = preassignedRunId || nowRunId()
     const config = await loadConfig()
+    resetLeadState()
 
     try {
         configureDomainCache({
@@ -388,6 +389,7 @@ async function main() {
             webhooks: [pipelineAResult, pipelineBResult, { channel: 'sms', ...smsResult }],
             pipelineBEmailCount: pipelineBEmailLeads.length,
             pipelineBSmsCount: pipelineBSmsLeads.length,
+            fallback: stats.fallback,
         })
 
         await postRunStatus(config, 'completed', artifacts.runId, {

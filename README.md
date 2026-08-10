@@ -66,7 +66,7 @@ Optional:
 - `SCRAPER_RUN_STATUS_URL`, `SCRAPER_RUN_STATUS_TOKEN`
 - `PUBLIC_SOCIAL_RESEARCH_ENABLED` (default `false`): after an operator has
 	reviewed applicable law and platform terms, retain minimized prose from a
-	publicly accessible business profile for Spec Build research.
+	publicly accessible Facebook or Yelp business profile for Spec Build research.
 
 ## Public social research safeguards
 
@@ -80,7 +80,7 @@ When enabled, the worker:
 - reads only a profile already reached during normal lead enrichment;
 - never logs in, fills a login form, solves a challenge, or bypasses a private,
 	consent, checkpoint, or CAPTCHA screen;
-- accepts only HTTPS Facebook profile URLs and rejects any other host;
+- accepts only HTTPS Facebook profiles and canonical Yelp `/biz/` pages;
 - retains no images, videos, comments, reactions, friend/follower lists, or
 	hidden API responses;
 - redacts email addresses and phone numbers, removes browser chrome and URLs,
