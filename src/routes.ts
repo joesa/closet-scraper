@@ -195,6 +195,11 @@ export function selectComplementaryProfileUrls(inputs: Array<string | null | und
     return [selected.get('yelp'), selected.get('social')].filter((url): url is string => !!url)
 }
 
+function fallbackRequestKey(label: string, rawLead: RawLead, suffix: string): string {
+    const place = rawLead.mapsPlaceUrl || rawLead.businessName || 'unknown-lead'
+    return `${label}:${place}:${suffix}`.slice(0, 900)
+}
+
 async function extractExpandedServices(page: any): Promise<string[]> {
     try {
         const servicesControl = page
@@ -454,6 +459,7 @@ export function buildRouter(config: ScraperConfig) {
                     await addRequests([{
                         url: profileUrl,
                         label: 'SOCIAL_PROFILE_SCRAPE',
+                        uniqueKey: fallbackRequestKey('SOCIAL_PROFILE_SCRAPE', rawLead, profileUrl),
                         userData: { seed, rawLead, pendingProfileUrls }
                     }])
                     return
@@ -467,6 +473,7 @@ export function buildRouter(config: ScraperConfig) {
                 await addRequests([{
                     url: searchUrl,
                     label: 'SOCIAL_SERP_SEARCH',
+                    uniqueKey: fallbackRequestKey('SOCIAL_SERP_SEARCH', rawLead, searchUrl),
                     userData: { seed, rawLead }
                 }])
                 return // Stop processing this lead here, let the fallback handle it
@@ -526,6 +533,7 @@ export function buildRouter(config: ScraperConfig) {
                     await addRequests([{
                         url: profileUrl,
                         label: 'SOCIAL_PROFILE_SCRAPE',
+                        uniqueKey: fallbackRequestKey('SOCIAL_PROFILE_SCRAPE', userData.rawLead, profileUrl),
                         userData: { ...userData, pendingProfileUrls }
                     }])
                     return
@@ -534,6 +542,7 @@ export function buildRouter(config: ScraperConfig) {
                 await addRequests([{
                     url: request.url, // arbitrary URL just to trigger the fallback processing
                     label: 'FINALIZE_FALLBACK',
+                    uniqueKey: fallbackRequestKey('FINALIZE_FALLBACK', userData.rawLead, request.id || request.url),
                     userData
                 }])
                 return
@@ -571,6 +580,7 @@ export function buildRouter(config: ScraperConfig) {
                 await addRequests([{
                     url: profileUrl,
                     label: 'SOCIAL_PROFILE_SCRAPE',
+                    uniqueKey: fallbackRequestKey('SOCIAL_PROFILE_SCRAPE', userData.rawLead, profileUrl),
                     userData: { ...userData, pendingProfileUrls }
                 }])
             } else {
@@ -578,6 +588,7 @@ export function buildRouter(config: ScraperConfig) {
                 await addRequests([{
                     url: request.url,
                     label: 'FINALIZE_FALLBACK',
+                    uniqueKey: fallbackRequestKey('FINALIZE_FALLBACK', userData.rawLead, request.id || request.url),
                     userData
                 }])
             }
@@ -592,6 +603,7 @@ export function buildRouter(config: ScraperConfig) {
                 await addRequests([{
                     url: profileUrl,
                     label: 'SOCIAL_PROFILE_SCRAPE',
+                    uniqueKey: fallbackRequestKey('SOCIAL_PROFILE_SCRAPE', userData.rawLead, profileUrl),
                     userData: { ...userData, pendingProfileUrls }
                 }])
                 return
@@ -599,6 +611,7 @@ export function buildRouter(config: ScraperConfig) {
             await addRequests([{
                 url: request.url,
                 label: 'FINALIZE_FALLBACK',
+                uniqueKey: fallbackRequestKey('FINALIZE_FALLBACK', userData.rawLead, request.id || request.url),
                 userData
             }])
         }
@@ -650,6 +663,7 @@ export function buildRouter(config: ScraperConfig) {
                 await addRequests([{
                     url: nextProfileUrl,
                     label: 'SOCIAL_PROFILE_SCRAPE',
+                    uniqueKey: fallbackRequestKey('SOCIAL_PROFILE_SCRAPE', userData.rawLead, nextProfileUrl),
                     userData: { ...userData, pendingProfileUrls: remainingProfileUrls }
                 }])
                 return
@@ -686,6 +700,7 @@ export function buildRouter(config: ScraperConfig) {
                 await addRequests([{
                     url: targetUrl,
                     label: 'FINALIZE_FALLBACK',
+                    uniqueKey: fallbackRequestKey('FINALIZE_FALLBACK', userData.rawLead, targetUrl),
                     userData
                 }])
             }
@@ -696,6 +711,7 @@ export function buildRouter(config: ScraperConfig) {
                 await addRequests([{
                     url: nextProfileUrl,
                     label: 'SOCIAL_PROFILE_SCRAPE',
+                    uniqueKey: fallbackRequestKey('SOCIAL_PROFILE_SCRAPE', userData.rawLead, nextProfileUrl),
                     userData: { ...userData, pendingProfileUrls: remainingProfileUrls }
                 }])
                 return
@@ -703,6 +719,7 @@ export function buildRouter(config: ScraperConfig) {
             await addRequests([{
                 url: request.url,
                 label: 'FINALIZE_FALLBACK',
+                uniqueKey: fallbackRequestKey('FINALIZE_FALLBACK', userData.rawLead, request.id || request.url),
                 userData
             }])
         }
@@ -774,6 +791,13 @@ export function buildRouter(config: ScraperConfig) {
 
         upsertLead(qualifiedLead)
         await pushData(withoutPublicProfileResearch(qualifiedLead))
+        log.info('Qualified fallback lead', {
+            business: qualifiedLead.businessName,
+            reason: qualifiedLead.enrichment.reason,
+            pipeline: qualifiedLead.enrichment.pipeline,
+            primaryEmail: qualifiedLead.enrichment.primaryEmail,
+            outreachRank: qualifiedLead.enrichment.outreachRank,
+        })
     })
 
     return router
