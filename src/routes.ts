@@ -8,7 +8,12 @@ import {
     publicProfileAboutUrl,
     withoutPublicProfileResearch,
 } from './social-profile-research.js'
-import { upsertLead } from './state.js'
+import {
+    noteFallbackCaptcha,
+    noteFallbackEntered,
+    noteFallbackFinalized,
+    upsertLead,
+} from './state.js'
 import type { QualifiedLead, RawLead, SearchSeed } from './types.js'
 
 type RouteUserData = {
@@ -450,6 +455,7 @@ export function buildRouter(config: ScraperConfig) {
                 log.warning('Lead missing website and businessName, skipping fallback', { url: request.url })
             } else {
                 log.info('Lead missing website, engaging Omni-Channel fallback', { business: rawLead.businessName })
+                noteFallbackEntered(rawLead.mapsPlaceUrl)
                 const knownProfileUrls = selectComplementaryProfileUrls([
                     rawLead.yelpUrl,
                     rawLead.socialProfileUrl,
@@ -524,6 +530,7 @@ export function buildRouter(config: ScraperConfig) {
             const isCaptcha = await isGoogleBlocked(page)
             if (isCaptcha) {
                 log.warning('Google Search CAPTCHA hit, silently failing SERP hunt', { business: userData.rawLead.businessName })
+                noteFallbackCaptcha(userData.rawLead.mapsPlaceUrl)
                 const knownProfileUrls = selectComplementaryProfileUrls([
                     userData.rawLead.yelpUrl,
                     userData.rawLead.socialProfileUrl,
@@ -693,6 +700,7 @@ export function buildRouter(config: ScraperConfig) {
                         outreachRank: 'B1' as const,
                     }
                 }
+                noteFallbackFinalized(qualifiedLead.mapsPlaceUrl, true)
                 upsertLead(qualifiedLead)
                 await pushData(withoutPublicProfileResearch(qualifiedLead))
             } else {
@@ -789,6 +797,7 @@ export function buildRouter(config: ScraperConfig) {
             enrichment,
         }
 
+        noteFallbackFinalized(qualifiedLead.mapsPlaceUrl, Boolean(foundEmail))
         upsertLead(qualifiedLead)
         await pushData(withoutPublicProfileResearch(qualifiedLead))
         log.info('Qualified fallback lead', {
