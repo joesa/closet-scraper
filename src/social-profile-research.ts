@@ -7,6 +7,8 @@ const ALLOWED_HOSTS = new Set([
   'facebook.com',
   'm.facebook.com',
   'www.facebook.com',
+  'yelp.com',
+  'www.yelp.com',
 ])
 
 const BLOCKED_PATH_PARTS = ['/login', '/checkpoint', '/challenge', '/consent']
@@ -18,6 +20,8 @@ const BLOCKED_PAGE_MARKERS = [
   'security check required',
   'this content isn\'t available',
   'this account is private',
+  'are you a human?',
+  'unusual activity from your computer network',
 ]
 
 const CHROME_LINES = new Set([
@@ -37,6 +41,7 @@ const CHROME_LINES = new Set([
 
 const EMAIL_RE = /[\w.+-]+@[\w-]+(?:\.[\w-]+)+/gi
 const PHONE_RE = /(?:\+?\d[\s().-]{0,2}){9,}\d/g
+const YELP_STOP_LINE_RE = /^(?:(?:recommended\s+)?reviews?\b|review highlights\b|ask the community\b|you might also consider\b|people also (?:searched|viewed)\b|reach out to other businesses\b|browse nearby\b|related searches?\b)/i
 
 export type PublicProfileResearchResult =
   | { research: PublicProfileResearch; reason?: never }
@@ -59,6 +64,13 @@ function parseAllowedUrl(value: string): URL | null {
   } catch {
     return null
   }
+}
+
+function profilePlatform(parsed: URL): 'facebook' | 'yelp' | null {
+  const hostname = parsed.hostname.toLowerCase().replace(/^www\./, '')
+  if (hostname === 'facebook.com' || hostname === 'm.facebook.com') return 'facebook'
+  if (hostname === 'yelp.com' && parsed.pathname.toLowerCase().startsWith('/biz/')) return 'yelp'
+  return null
 }
 
 export function publicProfileAboutUrl(value: string): string {
@@ -95,6 +107,11 @@ export function buildPublicProfileResearch(input: {
   const requested = parseAllowedUrl(input.requestedUrl)
   const loaded = parseAllowedUrl(input.loadedUrl)
   if (!requested || !loaded) return { research: null, reason: 'unsupported_or_insecure_url' }
+  const requestedPlatform = profilePlatform(requested)
+  const loadedPlatform = profilePlatform(loaded)
+  if (!requestedPlatform || requestedPlatform !== loadedPlatform) {
+    return { research: null, reason: 'unsupported_or_cross_platform_url' }
+  }
 
   const loadedPath = loaded.pathname.toLowerCase()
   if (BLOCKED_PATH_PARTS.some((part) => loadedPath.includes(part))) {
@@ -109,6 +126,7 @@ export function buildPublicProfileResearch(input: {
   const seen = new Set<string>()
   const lines: string[] = []
   for (const rawLine of input.bodyText.split(/\r?\n/)) {
+    if (requestedPlatform === 'yelp' && YELP_STOP_LINE_RE.test(rawLine.trim())) break
     const line = rawLine
       .replace(/[\u0000-\u001f\u007f]/g, ' ')
       .replace(EMAIL_RE, '[contact redacted]')

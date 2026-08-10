@@ -14,6 +14,8 @@ import type { QualifiedLead, RawLead, SearchSeed } from './types.js'
 type RouteUserData = {
     seed?: SearchSeed
     rawLead?: RawLead
+    pendingProfileUrls?: string[]
+    discoveredProfileEmail?: string | null
 }
 
 function toAbsoluteGoogleMapsUrl(input: string | null): string | null {
@@ -168,15 +170,29 @@ function normalizeWebsiteFromMaps(input: string | null): string | null {
     }
 }
 
-function isSocialProfileUrl(input: string | null): boolean {
-    if (!input) return false
+function publicProfileKind(input: string | null): 'social' | 'yelp' | null {
+    if (!input) return null
     try {
-        const hostname = new URL(input).hostname.toLowerCase().replace(/^www\./, '')
-        return hostname === 'facebook.com' || hostname.endsWith('.facebook.com') ||
+        const url = new URL(input)
+        const hostname = url.hostname.toLowerCase().replace(/^www\./, '')
+        if (hostname === 'facebook.com' || hostname.endsWith('.facebook.com') ||
             hostname === 'instagram.com' || hostname.endsWith('.instagram.com')
+        ) return 'social'
+        if ((hostname === 'yelp.com' || hostname.endsWith('.yelp.com')) && url.pathname.toLowerCase().startsWith('/biz/')) return 'yelp'
+        return null
     } catch {
-        return false
+        return null
     }
+}
+
+export function selectComplementaryProfileUrls(inputs: Array<string | null | undefined>): string[] {
+    const selected = new Map<'social' | 'yelp', string>()
+    for (const input of inputs) {
+        if (!input) continue
+        const kind = publicProfileKind(input)
+        if (kind && !selected.has(kind)) selected.set(kind, input)
+    }
+    return [selected.get('yelp'), selected.get('social')].filter((url): url is string => !!url)
 }
 
 async function extractExpandedServices(page: any): Promise<string[]> {
@@ -386,8 +402,10 @@ export function buildRouter(config: ScraperConfig) {
         }
 
         const normalizedMapsUrl = normalizeWebsiteFromMaps(scraped.websiteUrl)
-        const mapsSocialProfileUrl = isSocialProfileUrl(normalizedMapsUrl) ? normalizedMapsUrl : null
-        const ownWebsiteUrl = mapsSocialProfileUrl ? null : normalizedMapsUrl
+        const mapsProfileKind = publicProfileKind(normalizedMapsUrl)
+        const mapsSocialProfileUrl = mapsProfileKind === 'social' ? normalizedMapsUrl : null
+        const mapsYelpUrl = mapsProfileKind === 'yelp' ? normalizedMapsUrl : null
+        const ownWebsiteUrl = mapsProfileKind ? null : normalizedMapsUrl
         const businessDetails = normalizeBusinessDetails({
             sourceKeyword: seed.keyword,
             primaryCategory: scraped.primaryCategory,
@@ -404,6 +422,7 @@ export function buildRouter(config: ScraperConfig) {
             ...businessDetails,
             websiteUrl: ownWebsiteUrl,
             socialProfileUrl: mapsSocialProfileUrl,
+            yelpUrl: mapsYelpUrl,
             hasOwnWebsite: Boolean(ownWebsiteUrl),
             phoneNumber,
             address: scraped.address,
@@ -426,18 +445,23 @@ export function buildRouter(config: ScraperConfig) {
                 log.warning('Lead missing website and businessName, skipping fallback', { url: request.url })
             } else {
                 log.info('Lead missing website, engaging Omni-Channel fallback', { business: rawLead.businessName })
-                
-                if (rawLead.socialProfileUrl) {
+                const knownProfileUrls = selectComplementaryProfileUrls([
+                    rawLead.yelpUrl,
+                    rawLead.socialProfileUrl,
+                ])
+                if (knownProfileUrls.length === 2) {
+                    const [profileUrl, ...pendingProfileUrls] = knownProfileUrls
                     await addRequests([{
-                        url: rawLead.socialProfileUrl,
+                        url: profileUrl,
                         label: 'SOCIAL_PROFILE_SCRAPE',
-                        userData: { seed, rawLead }
+                        userData: { seed, rawLead, pendingProfileUrls }
                     }])
                     return
                 }
 
-                // Construct Google Search URL for social profiles
-                const sq = encodeURIComponent(`site:facebook.com OR site:instagram.com "${rawLead.businessName}" "${seed.location}"`)
+                // Search even when one profile is known so Facebook and Yelp
+                // can complement each other on the same lead.
+                const sq = encodeURIComponent(`site:facebook.com OR site:instagram.com OR site:yelp.com/biz "${rawLead.businessName}" "${seed.location}"`)
                 const searchUrl = `https://www.google.com/search?q=${sq}`
                 
                 await addRequests([{
@@ -493,6 +517,19 @@ export function buildRouter(config: ScraperConfig) {
             const isCaptcha = await isGoogleBlocked(page)
             if (isCaptcha) {
                 log.warning('Google Search CAPTCHA hit, silently failing SERP hunt', { business: userData.rawLead.businessName })
+                const knownProfileUrls = selectComplementaryProfileUrls([
+                    userData.rawLead.yelpUrl,
+                    userData.rawLead.socialProfileUrl,
+                ])
+                if (knownProfileUrls.length > 0) {
+                    const [profileUrl, ...pendingProfileUrls] = knownProfileUrls
+                    await addRequests([{
+                        url: profileUrl,
+                        label: 'SOCIAL_PROFILE_SCRAPE',
+                        userData: { ...userData, pendingProfileUrls }
+                    }])
+                    return
+                }
                 // Let it fall through to SMS / Lumpy Mail by classifying with null website
                 await addRequests([{
                     url: request.url, // arbitrary URL just to trigger the fallback processing
@@ -502,31 +539,39 @@ export function buildRouter(config: ScraperConfig) {
                 return
             }
 
-            const socialUrl = await page.evaluate(() => {
+            const discoveredUrls = await page.evaluate(() => {
                 const anchors = Array.from(document.querySelectorAll('a[href]')) as HTMLAnchorElement[]
+                const matches: string[] = []
                 for (const a of anchors) {
                     const href = a.href
-                    if (href.includes('facebook.com') || href.includes('instagram.com')) {
+                    if (href.includes('facebook.com') || href.includes('instagram.com') || href.includes('yelp.com/biz/')) {
                         // ignore google tracking params
                         try {
                             const u = new URL(href)
                             if (u.hostname.endsWith('google.com') && u.pathname === '/url') {
                                 const q = u.searchParams.get('q')
-                                if (q && (q.includes('facebook.com') || q.includes('instagram.com'))) return q
+                                if (q && (q.includes('facebook.com') || q.includes('instagram.com') || q.includes('yelp.com/biz/'))) matches.push(q)
+                            } else {
+                                matches.push(href)
                             }
-                            return href
                         } catch { }
                     }
                 }
-                return null
+                return matches
             })
 
-            if (socialUrl) {
-                log.info('Found social profile', { url: socialUrl })
+            const profileUrls = selectComplementaryProfileUrls([
+                userData.rawLead.yelpUrl,
+                userData.rawLead.socialProfileUrl,
+                ...discoveredUrls,
+            ])
+            if (profileUrls.length > 0) {
+                const [profileUrl, ...pendingProfileUrls] = profileUrls
+                log.info('Found public business profiles', { profileUrls })
                 await addRequests([{
-                    url: socialUrl,
+                    url: profileUrl,
                     label: 'SOCIAL_PROFILE_SCRAPE',
-                    userData
+                    userData: { ...userData, pendingProfileUrls }
                 }])
             } else {
                 log.info('No social profile found in SERP', { business: userData.rawLead.businessName })
@@ -538,6 +583,19 @@ export function buildRouter(config: ScraperConfig) {
             }
         } catch (err) {
             log.warning('SOCIAL_SERP_SEARCH failed', { err: String(err) })
+            const knownProfileUrls = selectComplementaryProfileUrls([
+                userData.rawLead.yelpUrl,
+                userData.rawLead.socialProfileUrl,
+            ])
+            if (knownProfileUrls.length > 0) {
+                const [profileUrl, ...pendingProfileUrls] = knownProfileUrls
+                await addRequests([{
+                    url: profileUrl,
+                    label: 'SOCIAL_PROFILE_SCRAPE',
+                    userData: { ...userData, pendingProfileUrls }
+                }])
+                return
+            }
             await addRequests([{
                 url: request.url,
                 label: 'FINALIZE_FALLBACK',
@@ -579,10 +637,26 @@ export function buildRouter(config: ScraperConfig) {
             // Basic email regex extraction
             const emailMatch = text.match(/([a-zA-Z0-9._-]+@[a-zA-Z0-9._-]+\.[a-zA-Z0-9_-]+)/)
             const extractedEmail = emailMatch ? emailMatch[1].trim().toLowerCase() : null
+            if (extractedEmail) userData.discoveredProfileEmail = extractedEmail
 
-            userData.rawLead.socialProfileUrl = request.url
+            if (publicProfileKind(request.url) === 'yelp') {
+                userData.rawLead.yelpUrl = request.url
+            } else {
+                userData.rawLead.socialProfileUrl = request.url
+            }
 
-            if (extractedEmail) {
+            const [nextProfileUrl, ...remainingProfileUrls] = userData.pendingProfileUrls ?? []
+            if (nextProfileUrl) {
+                await addRequests([{
+                    url: nextProfileUrl,
+                    label: 'SOCIAL_PROFILE_SCRAPE',
+                    userData: { ...userData, pendingProfileUrls: remainingProfileUrls }
+                }])
+                return
+            }
+
+            const profileEmail = userData.discoveredProfileEmail || extractedEmail
+            if (profileEmail) {
                 log.info('Extracted a public contact email from social profile')
                 // A social profile is a contact channel, not an owned website.
                 const qualifiedLead: QualifiedLead = {
@@ -591,14 +665,14 @@ export function buildRouter(config: ScraperConfig) {
                         pipeline: 'PIPELINE_B' as const,
                         reason: 'social_profile_extraction' as const,
                         contactPageUrl: targetUrl,
-                        primaryEmail: extractedEmail,
+                        primaryEmail: profileEmail,
                         decisionMakerName: null,
                         decisionMakerTitle: null,
-                        decisionMakerEmail: extractedEmail,
+                        decisionMakerEmail: profileEmail,
                         decisionMakerEmailType: 'unknown',
                         decisionMakerEmailConfidence: 80,
                         decisionMakerEmailSource: 'social',
-                        discoveredEmails: [extractedEmail],
+                        discoveredEmails: [profileEmail],
                         pagesScanned: [targetUrl],
                         confidenceScore: 80,
                         confidenceLabel: 'medium' as const,
@@ -617,6 +691,15 @@ export function buildRouter(config: ScraperConfig) {
             }
         } catch (err) {
             log.warning('SOCIAL_PROFILE_SCRAPE failed', { err: String(err) })
+            const [nextProfileUrl, ...remainingProfileUrls] = userData.pendingProfileUrls ?? []
+            if (nextProfileUrl) {
+                await addRequests([{
+                    url: nextProfileUrl,
+                    label: 'SOCIAL_PROFILE_SCRAPE',
+                    userData: { ...userData, pendingProfileUrls: remainingProfileUrls }
+                }])
+                return
+            }
             await addRequests([{
                 url: request.url,
                 label: 'FINALIZE_FALLBACK',
@@ -629,16 +712,17 @@ export function buildRouter(config: ScraperConfig) {
         const userData = request.userData as RouteUserData
         if (!userData.rawLead) return
         
-        let foundEmail: string | null = null
-        
-        const fallback = await guessAndVerifyFallbackEmails(userData.rawLead.businessName, {
-            enableMxCheck: config.enableMxCheck,
-            enableSmtpCheck: config.enableSmtpCheck,
-            smtpTimeoutMs: config.smtpTimeoutMs,
-            smtpMinIntervalMs: config.smtpMinIntervalMs,
-            smtpMaxProbesPerDomain: config.smtpMaxProbesPerDomain,
-            cacheValidationTtlDays: config.domainCacheValidationTtlDays,
-        })
+        let foundEmail: string | null = userData.discoveredProfileEmail || null
+        const fallback = foundEmail
+            ? null
+            : await guessAndVerifyFallbackEmails(userData.rawLead.businessName, {
+                enableMxCheck: config.enableMxCheck,
+                enableSmtpCheck: config.enableSmtpCheck,
+                smtpTimeoutMs: config.smtpTimeoutMs,
+                smtpMinIntervalMs: config.smtpMinIntervalMs,
+                smtpMaxProbesPerDomain: config.smtpMaxProbesPerDomain,
+                cacheValidationTtlDays: config.domainCacheValidationTtlDays,
+            })
 
         if (fallback) {
             log.info('Recovered email via SMTP fallback', { email: fallback.email })
@@ -647,18 +731,22 @@ export function buildRouter(config: ScraperConfig) {
 
         const enrichment = foundEmail ? {
             pipeline: 'PIPELINE_B' as const,
-            reason: 'smtp_domain_guessing' as const,
+            reason: userData.discoveredProfileEmail
+                ? 'social_profile_extraction' as const
+                : 'smtp_domain_guessing' as const,
             contactPageUrl: null,
             primaryEmail: foundEmail,
             decisionMakerName: null,
             decisionMakerTitle: null,
             decisionMakerEmail: foundEmail,
             decisionMakerEmailType: 'unknown' as const,
-            decisionMakerEmailConfidence: fallback?.confidence || 0,
-            decisionMakerEmailSource: 'smtp_guess' as const,
+            decisionMakerEmailConfidence: userData.discoveredProfileEmail ? 80 : fallback?.confidence || 0,
+            decisionMakerEmailSource: userData.discoveredProfileEmail
+                ? 'social' as const
+                : 'smtp_guess' as const,
             discoveredEmails: [foundEmail],
             pagesScanned: [],
-            confidenceScore: fallback?.confidence || 0,
+            confidenceScore: userData.discoveredProfileEmail ? 80 : fallback?.confidence || 0,
             confidenceLabel: 'medium' as const,
             outreachRank: 'B1' as const,
         } : {
