@@ -205,6 +205,86 @@ function fallbackRequestKey(label: string, rawLead: RawLead, suffix: string): st
     return `${label}:${place}:${suffix}`.slice(0, 900)
 }
 
+async function finalizeFallbackLead(
+    userData: RouteUserData,
+    config: ScraperConfig,
+    pushData: (data: Record<string, unknown>) => Promise<void>,
+    log: { info: (message: string, data?: Record<string, unknown>) => void }
+): Promise<void> {
+    if (!userData.rawLead) return
+
+    let foundEmail: string | null = userData.discoveredProfileEmail || null
+    const fallback = foundEmail
+        ? null
+        : await guessAndVerifyFallbackEmails(userData.rawLead.businessName, {
+            enableMxCheck: config.enableMxCheck,
+            enableSmtpCheck: config.enableSmtpCheck,
+            smtpTimeoutMs: config.smtpTimeoutMs,
+            smtpMinIntervalMs: config.smtpMinIntervalMs,
+            smtpMaxProbesPerDomain: config.smtpMaxProbesPerDomain,
+            cacheValidationTtlDays: config.domainCacheValidationTtlDays,
+        })
+
+    if (fallback) {
+        log.info('Recovered email via SMTP fallback', { email: fallback.email })
+        foundEmail = fallback.email
+    }
+
+    const enrichment = foundEmail ? {
+        pipeline: 'PIPELINE_B' as const,
+        reason: userData.discoveredProfileEmail
+            ? 'social_profile_extraction' as const
+            : 'smtp_domain_guessing' as const,
+        contactPageUrl: null,
+        primaryEmail: foundEmail,
+        decisionMakerName: null,
+        decisionMakerTitle: null,
+        decisionMakerEmail: foundEmail,
+        decisionMakerEmailType: 'unknown' as const,
+        decisionMakerEmailConfidence: userData.discoveredProfileEmail ? 80 : fallback?.confidence || 0,
+        decisionMakerEmailSource: userData.discoveredProfileEmail
+            ? 'social' as const
+            : 'smtp_guess' as const,
+        discoveredEmails: [foundEmail],
+        pagesScanned: [],
+        confidenceScore: userData.discoveredProfileEmail ? 80 : fallback?.confidence || 0,
+        confidenceLabel: 'medium' as const,
+        outreachRank: 'B1' as const,
+    } : {
+        pipeline: 'PIPELINE_B' as const,
+        reason: 'missing_website' as const,
+        contactPageUrl: null,
+        primaryEmail: null,
+        decisionMakerName: null,
+        decisionMakerTitle: null,
+        decisionMakerEmail: null,
+        decisionMakerEmailType: 'unknown' as const,
+        decisionMakerEmailConfidence: 0,
+        decisionMakerEmailSource: 'none' as const,
+        discoveredEmails: [],
+        pagesScanned: [],
+        confidenceScore: 0,
+        confidenceLabel: 'low' as const,
+        outreachRank: 'B1' as const,
+    }
+
+    const qualifiedLead: QualifiedLead = {
+        ...userData.rawLead,
+        enrichment,
+    }
+
+    noteFallbackFinalized(qualifiedLead.mapsPlaceUrl, Boolean(foundEmail))
+    upsertLead(qualifiedLead)
+    await pushData(withoutPublicProfileResearch(qualifiedLead))
+    log.info('Qualified fallback lead', {
+        business: qualifiedLead.businessName,
+        reason: qualifiedLead.enrichment.reason,
+        pipeline: qualifiedLead.enrichment.pipeline,
+        primaryEmail: qualifiedLead.enrichment.primaryEmail,
+        outreachRank: qualifiedLead.enrichment.outreachRank,
+    })
+}
+
 async function extractExpandedServices(page: any): Promise<string[]> {
     try {
         const servicesControl = page
@@ -518,7 +598,7 @@ export function buildRouter(config: ScraperConfig) {
         })
     })
 
-    router.addHandler('SOCIAL_SERP_SEARCH', async ({ request, page, log, addRequests }) => {
+    router.addHandler('SOCIAL_SERP_SEARCH', async ({ request, page, log, addRequests, pushData }) => {
         const userData = request.userData as RouteUserData
         if (!userData.rawLead) return
 
@@ -545,13 +625,8 @@ export function buildRouter(config: ScraperConfig) {
                     }])
                     return
                 }
-                // Let it fall through to SMS / Lumpy Mail by classifying with null website
-                await addRequests([{
-                    url: request.url, // arbitrary URL just to trigger the fallback processing
-                    label: 'FINALIZE_FALLBACK',
-                    uniqueKey: fallbackRequestKey('FINALIZE_FALLBACK', userData.rawLead, request.id || request.url),
-                    userData
-                }])
+                // Finalize inline so capped request budgets can't starve fallback completion.
+                await finalizeFallbackLead(userData, config, pushData, log)
                 return
             }
 
@@ -592,12 +667,7 @@ export function buildRouter(config: ScraperConfig) {
                 }])
             } else {
                 log.info('No social profile found in SERP', { business: userData.rawLead.businessName })
-                await addRequests([{
-                    url: request.url,
-                    label: 'FINALIZE_FALLBACK',
-                    uniqueKey: fallbackRequestKey('FINALIZE_FALLBACK', userData.rawLead, request.id || request.url),
-                    userData
-                }])
+                await finalizeFallbackLead(userData, config, pushData, log)
             }
         } catch (err) {
             log.warning('SOCIAL_SERP_SEARCH failed', { err: String(err) })
@@ -615,12 +685,7 @@ export function buildRouter(config: ScraperConfig) {
                 }])
                 return
             }
-            await addRequests([{
-                url: request.url,
-                label: 'FINALIZE_FALLBACK',
-                uniqueKey: fallbackRequestKey('FINALIZE_FALLBACK', userData.rawLead, request.id || request.url),
-                userData
-            }])
+            await finalizeFallbackLead(userData, config, pushData, log)
         }
     })
 
@@ -705,12 +770,7 @@ export function buildRouter(config: ScraperConfig) {
                 await pushData(withoutPublicProfileResearch(qualifiedLead))
             } else {
                 log.info('No email found on social profile, trying SMTP guess', { business: userData.rawLead.businessName })
-                await addRequests([{
-                    url: targetUrl,
-                    label: 'FINALIZE_FALLBACK',
-                    uniqueKey: fallbackRequestKey('FINALIZE_FALLBACK', userData.rawLead, targetUrl),
-                    userData
-                }])
+                await finalizeFallbackLead(userData, config, pushData, log)
             }
         } catch (err) {
             log.warning('SOCIAL_PROFILE_SCRAPE failed', { err: String(err) })
@@ -724,89 +784,15 @@ export function buildRouter(config: ScraperConfig) {
                 }])
                 return
             }
-            await addRequests([{
-                url: request.url,
-                label: 'FINALIZE_FALLBACK',
-                uniqueKey: fallbackRequestKey('FINALIZE_FALLBACK', userData.rawLead, request.id || request.url),
-                userData
-            }])
+            await finalizeFallbackLead(userData, config, pushData, log)
         }
     })
 
     router.addHandler('FINALIZE_FALLBACK', async ({ request, pushData, log }) => {
         const userData = request.userData as RouteUserData
         if (!userData.rawLead) return
-        
-        let foundEmail: string | null = userData.discoveredProfileEmail || null
-        const fallback = foundEmail
-            ? null
-            : await guessAndVerifyFallbackEmails(userData.rawLead.businessName, {
-                enableMxCheck: config.enableMxCheck,
-                enableSmtpCheck: config.enableSmtpCheck,
-                smtpTimeoutMs: config.smtpTimeoutMs,
-                smtpMinIntervalMs: config.smtpMinIntervalMs,
-                smtpMaxProbesPerDomain: config.smtpMaxProbesPerDomain,
-                cacheValidationTtlDays: config.domainCacheValidationTtlDays,
-            })
 
-        if (fallback) {
-            log.info('Recovered email via SMTP fallback', { email: fallback.email })
-            foundEmail = fallback.email
-        }
-
-        const enrichment = foundEmail ? {
-            pipeline: 'PIPELINE_B' as const,
-            reason: userData.discoveredProfileEmail
-                ? 'social_profile_extraction' as const
-                : 'smtp_domain_guessing' as const,
-            contactPageUrl: null,
-            primaryEmail: foundEmail,
-            decisionMakerName: null,
-            decisionMakerTitle: null,
-            decisionMakerEmail: foundEmail,
-            decisionMakerEmailType: 'unknown' as const,
-            decisionMakerEmailConfidence: userData.discoveredProfileEmail ? 80 : fallback?.confidence || 0,
-            decisionMakerEmailSource: userData.discoveredProfileEmail
-                ? 'social' as const
-                : 'smtp_guess' as const,
-            discoveredEmails: [foundEmail],
-            pagesScanned: [],
-            confidenceScore: userData.discoveredProfileEmail ? 80 : fallback?.confidence || 0,
-            confidenceLabel: 'medium' as const,
-            outreachRank: 'B1' as const,
-        } : {
-            pipeline: 'PIPELINE_B' as const,
-            reason: 'missing_website' as const,
-            contactPageUrl: null,
-            primaryEmail: null,
-            decisionMakerName: null,
-            decisionMakerTitle: null,
-            decisionMakerEmail: null,
-            decisionMakerEmailType: 'unknown' as const,
-            decisionMakerEmailConfidence: 0,
-            decisionMakerEmailSource: 'none' as const,
-            discoveredEmails: [],
-            pagesScanned: [],
-            confidenceScore: 0,
-            confidenceLabel: 'low' as const,
-            outreachRank: 'B1' as const,
-        }
-
-        const qualifiedLead: QualifiedLead = {
-            ...userData.rawLead,
-            enrichment,
-        }
-
-        noteFallbackFinalized(qualifiedLead.mapsPlaceUrl, Boolean(foundEmail))
-        upsertLead(qualifiedLead)
-        await pushData(withoutPublicProfileResearch(qualifiedLead))
-        log.info('Qualified fallback lead', {
-            business: qualifiedLead.businessName,
-            reason: qualifiedLead.enrichment.reason,
-            pipeline: qualifiedLead.enrichment.pipeline,
-            primaryEmail: qualifiedLead.enrichment.primaryEmail,
-            outreachRank: qualifiedLead.enrichment.outreachRank,
-        })
+        await finalizeFallbackLead(userData, config, pushData, log)
     })
 
     return router

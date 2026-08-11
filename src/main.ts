@@ -251,6 +251,7 @@ async function main() {
             proxyMode: usingGatewayProxy ? 'gateway' : 'list',
             proxyCount: healthyProxyUrls.length,
             configuredProxyCount: configuredProxyUrls.length,
+            maxRequestsPerCrawl: config.maxRequestsPerCrawl,
             maxResultsPerQuery: config.maxResultsPerQuery,
             filters: {
                 noWebsiteOnly: config.noWebsiteOnly,
