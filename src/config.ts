@@ -247,7 +247,7 @@ function mergeRemoteConfig(base: ScraperConfig, remote: Record<string, unknown>)
   }
   if ('targetLocations' in remote) {
     const locations = safeRemoteArray(remote.targetLocations)
-    if (locations && locations.length) next.targetLocations = locations
+    if (locations) next.targetLocations = locations
   }
   if ('headless' in remote) {
     next.headless = safeRemoteBool(remote.headless) ?? next.headless
