@@ -209,7 +209,8 @@ async function finalizeFallbackLead(
     userData: RouteUserData,
     config: ScraperConfig,
     pushData: (data: Record<string, unknown>) => Promise<void>,
-    log: { info: (message: string, data?: Record<string, unknown>) => void }
+    log: { info: (message: string, data?: Record<string, unknown>) => void },
+    options: { publish?: boolean } = {}
 ): Promise<void> {
     if (!userData.rawLead) return
 
@@ -275,7 +276,9 @@ async function finalizeFallbackLead(
 
     noteFallbackFinalized(qualifiedLead.mapsPlaceUrl, Boolean(foundEmail))
     upsertLead(qualifiedLead)
-    await pushData(withoutPublicProfileResearch(qualifiedLead))
+    if (options.publish !== false) {
+        await pushData(withoutPublicProfileResearch(qualifiedLead))
+    }
     log.info('Qualified fallback lead', {
         business: qualifiedLead.businessName,
         reason: qualifiedLead.enrichment.reason,
@@ -536,6 +539,7 @@ export function buildRouter(config: ScraperConfig) {
             } else {
                 log.info('Lead missing website, engaging Omni-Channel fallback', { business: rawLead.businessName })
                 noteFallbackEntered(rawLead.mapsPlaceUrl)
+                await finalizeFallbackLead({ seed, rawLead }, config, async () => {}, log, { publish: false })
                 const knownProfileUrls = selectComplementaryProfileUrls([
                     rawLead.yelpUrl,
                     rawLead.socialProfileUrl,
